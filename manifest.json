@@ -1,49 +1,63 @@
 {
-  "name": "AdminPlus Auto-Login",
-  "short_name": "AdminPlus",
-  "description": "Schnelle und sichere Anmeldung mit QR-Code Scanning",
-  "start_url": "/",
+  "name": "EasyLogin - Sichere Login Manager PWA",
+  "short_name": "EasyLogin",
+  "description": "Sichere PWA für zentrale Login-Verwaltung mit QR-Code Integration und PeerJS Synchronisation",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#1e88e5",
   "orientation": "portrait-primary",
-  "icons": [
-    {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%231e88e5' width='192' height='192'/%3E%3Ctext x='50%' y='50%' font-size='120' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='white'%3EAP%3C/text%3E%3C/svg%3E",
-      "sizes": "192x192",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    }
-  ],
+  "theme_color": "#1F3A93",
+  "background_color": "#ffffff",
   "screenshots": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'%3E%3Crect fill='%23f5f7fa' width='540' height='720'/%3E%3C/svg%3E",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%231F3A93' width='540' height='720'/></svg>",
       "sizes": "540x720",
       "type": "image/svg+xml",
       "form_factor": "narrow"
     }
   ],
-  "categories": ["productivity"],
-  "screenshots_short": [
+  "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'%3E%3Crect fill='%23f5f7fa' width='540' height='720'/%3E%3C/svg%3E",
-      "sizes": "540x720",
-      "type": "image/svg+xml"
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%231F3A93' width='192' height='192' rx='40'/><path fill='white' d='M96 40c-9.94 0-18 8.06-18 18s8.06 18 18 18 18-8.06 18-18-8.06-18-18-18zm0 36c-9.94 0-18 8.06-18 18s8.06 18 18 18 18-8.06 18-18-8.06-18-18-18z'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%231F3A93' width='512' height='512' rx='100'/><path fill='white' d='M256 85c-25 0-45 20-45 45s20 45 45 45 45-20 45-45-20-45-45-45zm0 90c-25 0-45 20-45 45s20 45 45 45 45-20 45-45-20-45-45-45z'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ],
+  "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
-      "name": "QR-Code Scannen",
-      "short_name": "Scannen",
-      "description": "Schnelle Anmeldung mit QR-Code",
-      "url": "/?action=scan",
+      "name": "Kamera öffnen",
+      "short_name": "Kamera",
+      "description": "Öffne die Kamera zum QR-Code Scannen",
+      "url": "./?view=camera",
       "icons": [
         {
-          "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect fill='%231e88e5' width='96' height='96'/%3E%3Ctext x='50%' y='50%' font-size='60' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='white'%3E📱%3C/text%3E%3C/svg%3E",
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><path fill='%231F3A93' d='M48 20c-15.5 0-28 12.5-28 28s12.5 28 28 28 28-12.5 28-28-12.5-28-28-28z'/><circle fill='white' cx='48' cy='48' r='8'/></svg>",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Meine Logins",
+      "short_name": "Logins",
+      "description": "Öffne die Login Manager",
+      "url": "./?view=logins",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><path fill='%231F3A93' d='M30 20h36c5.5 0 10 4.5 10 10v36c0 5.5-4.5 10-10 10H30c-5.5 0-10-4.5-10-10V30c0-5.5 4.5-10 10-10z'/><rect fill='white' x='38' y='35' width='20' height='20' rx='2'/></svg>",
           "sizes": "96x96",
           "type": "image/svg+xml"
         }
       ]
     }
-  ]
+  ],
+  "prefer_related_applications": false
 }
