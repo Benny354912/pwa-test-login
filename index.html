@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="theme-color" content="#1e88e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AdminPlus">
+    
+    <title>AdminPlus - Schnelle Anmeldung</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%231e88e5' width='192' height='192'/%3E%3Ctext x='50%' y='50%' font-size='120' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='white'%3EAP%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <span id="status-text">AdminPlus</span>
+    </div>
+
+    <!-- Container -->
+    <div class="container">
+        <!-- Kamera-Ansicht (Scanner) -->
+        <div id="scanner-view" class="view active">
+            <div class="scanner-header">
+                <h1>📱 QR-Code Scannen</h1>
+                <p>Öffnen Sie die Browser-Erweiterung und scannen Sie den angezeigten QR-Code</p>
+            </div>
+
+            <div class="scanner-container">
+                <video id="camera" playsinline class="camera-video"></video>
+                <canvas id="canvas" class="camera-canvas hidden"></canvas>
+                <div class="scanner-overlay">
+                    <div class="scanner-frame"></div>
+                </div>
+            </div>
+
+            <div class="scanner-info">
+                <p>🔄 Kamera wird aktiviert...</p>
+            </div>
+
+            <button id="toggle-camera" class="btn-primary" style="margin-top: 16px;">
+                📷 Kamera starten
+            </button>
+        </div>
+
+        <!-- Login-Auswahl -->
+        <div id="login-view" class="view">
+            <div class="login-header">
+                <h1>🔐 Konten</h1>
+                <p id="instance-name" class="instance-name"></p>
+            </div>
+
+            <div id="login-list" class="login-list"></div>
+
+            <div class="login-actions">
+                <button id="add-login-btn" class="btn-primary">➕ Neues Konto hinzufügen</button>
+                <button id="back-to-scanner" class="btn-secondary">← Zurück</button>
+            </div>
+        </div>
+
+        <!-- Login-Eingabe -->
+        <div id="add-login-view" class="view">
+            <div class="form-header">
+                <h1>➕ Neues Konto</h1>
+                <p>Speichern Sie Ihre Anmeldedaten für schnelle Anmeldung</p>
+            </div>
+
+            <form id="add-login-form" class="login-form">
+                <div class="form-group">
+                    <label for="login-hostname">Organisation / Host:</label>
+                    <input type="text" id="login-hostname" placeholder="z.B. tkh.iw-erp.de" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label for="login-username">Benutzername:</label>
+                    <input type="text" id="login-username" placeholder="Benutzername" autocomplete="username" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="login-password">Passwort:</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="login-password" placeholder="Passwort" autocomplete="current-password" required>
+                        <button type="button" id="toggle-password" class="btn-icon">👁</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="login-remember" checked>
+                        Dieses Gerät vertrauen
+                    </label>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">✓ Speichern</button>
+                    <button type="button" id="cancel-add-login" class="btn-secondary">✕ Abbrechen</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Anmeldung läuft -->
+        <div id="login-progress-view" class="view">
+            <div class="progress-container">
+                <div class="spinner"></div>
+                <h2>Anmeldung läuft...</h2>
+                <p id="progress-text">Verbindung wird hergestellt</p>
+            </div>
+        </div>
+
+        <!-- Erfolg -->
+        <div id="success-view" class="view">
+            <div class="success-container">
+                <div class="success-icon">✓</div>
+                <h2>Anmeldung erfolgreich!</h2>
+                <p id="success-message">Sie werden weitergeleitet...</p>
+                <div class="countdown" id="countdown">3</div>
+            </div>
+        </div>
+
+        <!-- Fehler -->
+        <div id="error-view" class="view">
+            <div class="error-container">
+                <div class="error-icon">✕</div>
+                <h2>Fehler bei der Anmeldung</h2>
+                <p id="error-message">Ein Fehler ist aufgetreten</p>
+                <button id="error-retry" class="btn-primary">🔄 Erneut versuchen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
