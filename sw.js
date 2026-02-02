@@ -4,7 +4,9 @@ const ASSETS = [
   './styles.css',
   './app.js',
   './manifest.json',
-  './icon.svg'
+  './icon.svg',
+  './vendor/peerjs.min.js',
+  './vendor/html5-qrcode.min.js'
 ];
 
 self.addEventListener('install', (event) => {

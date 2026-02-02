@@ -77,24 +77,37 @@
   }
 
   function startScanner() {
-    if (!window.Html5Qrcode) {
+    if (qrScanner) return;
+
+    const container = document.getElementById('qr-reader');
+    if (!container) {
       updateScanStatus('Scanner nicht verfügbar', 'danger');
       return;
     }
 
-    if (qrScanner) return;
-    qrScanner = new Html5Qrcode('qr-reader');
+    if (!window.Html5Qrcode) {
+      updateScanStatus('Scanner lädt...', 'warning');
+      setTimeout(startScanner, 500);
+      return;
+    }
 
+    qrScanner = new window.Html5Qrcode('qr-reader');
     const config = { fps: 10, qrbox: { width: 240, height: 240 } };
 
-    Html5Qrcode.getCameras()
+    window.Html5Qrcode.getCameras()
       .then((cameras) => {
-        const cameraId = cameras?.[0]?.id;
-        if (!cameraId) throw new Error('Keine Kamera gefunden');
+        if (!cameras || cameras.length === 0) {
+          throw new Error('Keine Kamera gefunden');
+        }
+        const cameraId = cameras[0].id;
         updateScanStatus('Bereit zum Scannen', 'success');
         return qrScanner.start(cameraId, config, onScanSuccess, onScanFailure);
       })
-      .catch(() => updateScanStatus('Kamera nicht verfügbar', 'danger'));
+      .catch((err) => {
+        console.error('Scanner Fehler:', err);
+        updateScanStatus('Kamera nicht verfügbar', 'danger');
+        qrScanner = null;
+      });
   }
 
   function stopScanner() {
