@@ -1,572 +1,116 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="EasyLogin - Sichere Login Manager PWA">
-    <meta name="theme-color" content="#1F3A93">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="EasyLogin">
-    
-    <title>EasyLogin</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" sizes="192x192" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%231F3A93' width='192' height='192'/><path fill='white' d='M96 40c-9.94 0-18 8.06-18 18s8.06 18 18 18 18-8.06 18-18-8.06-18-18-18zm0 36c-9.94 0-18 8.06-18 18s8.06 18 18 18 18-8.06 18-18-8.06-18-18-18z'/></svg>">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231F3A93' width='180' height='180'/><path fill='white' d='M90 35c-9.27 0-16.82 7.55-16.82 16.82S80.73 68.64 90 68.64s16.82-7.55 16.82-16.82S99.27 35 90 35zm0 33.64c-9.27 0-16.82 7.55-16.82 16.82s7.55 16.82 16.82 16.82 16.82-7.55 16.82-16.82-7.55-16.82-16.82-16.82z'/></svg>">
-    
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #1F3A93 0%, #0A1F4F 100%);
-            color: #333;
-            min-height: 100vh;
-            overflow: hidden;
-        }
-        
-        .container {
-            width: 100%;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-        
-        /* ===== CAMERA VIEW ===== */
-        #cameraView {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: #000;
-            position: relative;
-            cursor: pointer;
-            overflow: hidden;
-        }
-        
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
-        
-        .scanner-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 280px;
-            height: 280px;
-            border: 3px solid #FF6B6B;
-            border-radius: 20px;
-            box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.5);
-            z-index: 10;
-        }
-        
-        .scanner-corners {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 280px;
-            height: 280px;
-        }
-        
-        .corner {
-            position: absolute;
-            width: 30px;
-            height: 30px;
-            border: 3px solid #00D9FF;
-        }
-        
-        .corner.top-left { top: 0; left: 0; border-right: none; border-bottom: none; }
-        .corner.top-right { top: 0; right: 0; border-left: none; border-bottom: none; }
-        .corner.bottom-left { bottom: 0; left: 0; border-right: none; border-top: none; }
-        .corner.bottom-right { bottom: 0; right: 0; border-left: none; border-top: none; }
-        
-        .scanning-line {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 280px;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, #FF6B6B, transparent);
-            animation: scan 2s infinite;
-            z-index: 11;
-        }
-        
-        @keyframes scan {
-            0%, 100% { top: 35%; }
-            50% { top: 65%; }
-        }
-        
-        .camera-hint {
-            position: absolute;
-            bottom: 30px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            color: white;
-            font-size: 14px;
-            z-index: 9;
-        }
-        
-        .loading-spinner {
-            display: none;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 20;
-        }
-        
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid white;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* ===== MANAGER VIEW ===== */
-        #managerView {
-            display: none;
-            flex-direction: column;
-            flex: 1;
-            overflow: hidden;
-            background: white;
-        }
-        
-        .manager-header {
-            background: linear-gradient(135deg, #1F3A93 0%, #0A1F4F 100%);
-            color: white;
-            padding: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .manager-header h1 {
-            font-size: 24px;
-            font-weight: 700;
-        }
-        
-        .header-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .icon-button {
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
-        }
-        
-        .icon-button:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
-        }
-        
-        .manager-tabs {
-            display: flex;
-            gap: 0;
-            background: white;
-            border-bottom: 1px solid #E0E0E0;
-            padding: 0 20px;
-        }
-        
-        .tab-button {
-            padding: 15px 20px;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            color: #999;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s ease;
-        }
-        
-        .tab-button.active {
-            color: #1F3A93;
-            border-bottom-color: #1F3A93;
-        }
-        
-        .tab-content {
-            display: none;
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        
-        .tab-content.active {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* ===== LOGINS TAB ===== */
-        #loginsContent {
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .login-item {
-            background: white;
-            border: 1px solid #E0E0E0;
-            border-radius: 12px;
-            padding: 16px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-        }
-        
-        .login-item:hover {
-            box-shadow: 0 4px 12px rgba(31, 58, 147, 0.15);
-            transform: translateY(-2px);
-            border-color: #1F3A93;
-        }
-        
-        .login-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        
-        .login-item-hostname {
-            font-weight: 700;
-            color: #1F3A93;
-            font-size: 16px;
-        }
-        
-        .login-item-actions {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .action-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            padding: 4px;
-            transition: all 0.2s ease;
-        }
-        
-        .action-btn:hover {
-            transform: scale(1.2);
-        }
-        
-        .login-item-username {
-            font-size: 13px;
-            color: #666;
-            margin-bottom: 4px;
-        }
-        
-        .login-item-password {
-            font-size: 12px;
-            color: #999;
-            font-family: monospace;
-            letter-spacing: 1px;
-        }
-        
-        .empty-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            flex: 1;
-            text-align: center;
-            color: #999;
-        }
-        
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 12px;
-            opacity: 0.5;
-        }
-        
-        .empty-state-text {
-            font-size: 16px;
-            margin-bottom: 4px;
-        }
-        
-        .empty-state-subtext {
-            font-size: 13px;
-            color: #CCC;
-        }
-        
-        /* ===== FORM MODAL ===== */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 100;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .modal.active {
-            display: flex;
-        }
-        
-        .modal-content {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            max-width: 400px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-        }
-        
-        .modal-header {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            color: #1F3A93;
-        }
-        
-        .form-group {
-            margin-bottom: 16px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #DDD;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: all 0.3s ease;
-        }
-        
-        .form-group input:focus {
-            outline: none;
-            border-color: #1F3A93;
-            box-shadow: 0 0 0 3px rgba(31, 58, 147, 0.1);
-        }
-        
-        .form-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 24px;
-        }
-        
-        .btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #1F3A93 0%, #0A1F4F 100%);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(31, 58, 147, 0.3);
-        }
-        
-        .btn-secondary {
-            background: #F0F0F0;
-            color: #333;
-        }
-        
-        .btn-secondary:hover {
-            background: #E0E0E0;
-        }
-        
-        /* ===== ALERTS ===== */
-        .alert {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            padding: 16px;
-            border-radius: 8px;
-            z-index: 200;
-            animation: slideIn 0.3s ease;
-        }
-        
-        @keyframes slideIn {
-            from { transform: translateX(-100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        
-        .alert-success {
-            background: #D4EDDA;
-            color: #155724;
-            border: 1px solid #C3E6CB;
-        }
-        
-        .alert-error {
-            background: #F8D7DA;
-            color: #721C24;
-            border: 1px solid #F5C6CB;
-        }
-        
-        .alert-info {
-            background: #D1ECF1;
-            color: #0C5460;
-            border: 1px solid #BEE5EB;
-        }
-        
-        /* ===== RESPONSIVE ===== */
-        @media (max-height: 500px) {
-            .scanner-overlay, .scanner-corners {
-                width: 200px !important;
-                height: 200px !important;
-            }
-            
-            .corner {
-                width: 20px !important;
-                height: 20px !important;
-            }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Easy Login</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#1e88e5" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <div class="container">
-        <!-- CAMERA VIEW -->
-        <div id="cameraView">
-            <video id="videoElement" playsinline></video>
-            <div class="scanner-overlay"></div>
-            <div class="scanner-corners">
-                <div class="corner top-left"></div>
-                <div class="corner top-right"></div>
-                <div class="corner bottom-left"></div>
-                <div class="corner bottom-right"></div>
-            </div>
-            <div class="scanning-line"></div>
-            <div class="loading-spinner">
-                <div class="spinner"></div>
-            </div>
-            <div class="camera-hint">Zum Öffnen des Managers hier tippen</div>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <h1>Easy Login</h1>
+          <p>Smartphone → Desktop‑Login</p>
         </div>
-        
-        <!-- MANAGER VIEW -->
-        <div id="managerView">
-            <div class="manager-header">
-                <h1>🔐 EasyLogin</h1>
-                <div class="header-buttons">
-                    <button class="icon-button" id="backBtn" title="Kamera">📷</button>
-                    <button class="icon-button" id="qrBtn" title="QR-Code">📱</button>
-                </div>
+      </div>
+      <button id="toggle-view" class="ghost-btn">Passwort‑Manager</button>
+    </header>
+
+    <main class="content">
+      <section id="scan-view" class="view active">
+        <div class="camera-card" id="scan-tap-area">
+          <div class="camera-header">
+            <h2>QR‑Code scannen</h2>
+            <span id="scan-status" class="status-pill">Kamera wird gestartet…</span>
+          </div>
+          <div id="qr-reader" class="qr-reader"></div>
+          <div class="scan-overlay">
+            <div class="scan-info">
+              <p>Tippe auf den Bildschirm, um den Passwort‑Manager zu öffnen.</p>
+              <p>Nach dem Scan wird automatisch verbunden.</p>
             </div>
-            
-            <div class="manager-tabs">
-                <button class="tab-button active" data-tab="logins">Meine Logins</button>
-                <button class="tab-button" data-tab="devices">Geräte</button>
-                <button class="tab-button" data-tab="settings">Einstellungen</button>
-            </div>
-            
-            <!-- LOGINS TAB -->
-            <div id="loginsContent" class="tab-content active">
-                <div class="empty-state">
-                    <div class="empty-state-icon">🔑</div>
-                    <div class="empty-state-text">Keine Logins gespeichert</div>
-                    <div class="empty-state-subtext">Logins werden über QR-Code hinzugefügt</div>
-                </div>
-            </div>
-            
-            <!-- DEVICES TAB -->
-            <div id="devicesContent" class="tab-content">
-                <div class="empty-state">
-                    <div class="empty-state-icon">📡</div>
-                    <div class="empty-state-text">Keine verbundenen Geräte</div>
-                    <div class="empty-state-subtext">Scanne einen QR-Code um zu verbinden</div>
-                </div>
-            </div>
-            
-            <!-- SETTINGS TAB -->
-            <div id="settingsContent" class="tab-content">
-                <h3 style="margin-bottom: 16px; color: #1F3A93;">Einstellungen</h3>
-                <button class="btn btn-secondary" id="clearAllBtn" style="width: 100%;">Alle Daten löschen</button>
-            </div>
+          </div>
         </div>
-    </div>
-    
-    <!-- MODALS -->
-    <div id="addLoginModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Neuen Login hinzufügen</div>
-            <form id="addLoginForm">
-                <div class="form-group">
-                    <label>Host-Name (z.B. example.com)</label>
-                    <input type="text" id="hostNameInput" placeholder="z.B. example.com" required>
-                </div>
-                <div class="form-group">
-                    <label>Benutzername</label>
-                    <input type="text" id="usernameInput" placeholder="Benutzername" required>
-                </div>
-                <div class="form-group">
-                    <label>Passwort</label>
-                    <input type="password" id="passwordInput" placeholder="••••••••" required>
-                </div>
-                <div class="form-buttons">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('addLoginModal')">Abbrechen</button>
-                    <button type="submit" class="btn btn-primary">Speichern</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <div id="qrDisplayModal" class="modal">
-        <div class="modal-content" style="text-align: center;">
-            <div class="modal-header">QR-Code anzeigen</div>
-            <div id="qrCodeContainer" style="margin: 20px 0; display: flex; justify-content: center;">
-                <canvas id="qrCanvas" width="250" height="250"></canvas>
+      </section>
+
+      <section id="manager-view" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Passwort‑Manager</h2>
+              <p class="muted">Gespeicherte Logins und manuelle Eingabe</p>
             </div>
-            <p style="font-size: 12px; color: #999; margin-bottom: 16px;">Scanne diesen QR-Code mit deinem Gerät</p>
-            <button class="btn btn-secondary" style="width: 100%;" onclick="closeModal('qrDisplayModal')">Schließen</button>
+            <button id="back-to-scan" class="ghost-btn">Zur Kamera</button>
+          </div>
+
+          <div class="connection-status">
+            <div>
+              <span class="label">Verbindung</span>
+              <span id="conn-status" class="status-pill warning">Nicht verbunden</span>
+            </div>
+            <div>
+              <span class="label">Instanz</span>
+              <span id="conn-instance" class="value">---</span>
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="card">
+              <h3>Gespeicherte Logins</h3>
+              <div id="login-list" class="login-list"></div>
+            </div>
+
+            <div class="card">
+              <h3>Neuen Login speichern</h3>
+              <form id="login-form" class="form">
+                <input type="hidden" id="login-id" />
+                <label>
+                  Name
+                  <input type="text" id="login-name" placeholder="z.B. AdminPlus" required />
+                </label>
+                <label>
+                  Username
+                  <input type="text" id="login-username" required />
+                </label>
+                <label>
+                  Passwort
+                  <input type="password" id="login-password" required />
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="primary-btn">Speichern</button>
+                  <button type="button" id="reset-form" class="ghost-btn">Zurücksetzen</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="card">
+              <h3>Manuell einloggen</h3>
+              <form id="manual-form" class="form">
+                <label>
+                  Username
+                  <input type="text" id="manual-username" required />
+                </label>
+                <label>
+                  Passwort
+                  <input type="password" id="manual-password" required />
+                </label>
+                <button type="submit" class="primary-btn">Login senden</button>
+              </form>
+              <p class="muted">Sendet die Zugangsdaten an die Desktop‑Erweiterung.</p>
+            </div>
+          </div>
         </div>
-    </div>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    <script src="app.js"></script>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
