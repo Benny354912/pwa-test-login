@@ -6,6 +6,7 @@ const ASSETS = [
   './manifest.json',
   './icon.svg',
   './vendor/peerjs.min.js',
+  './vendor/jsqr.js',
   './vendor/html5-qrcode.min.js'
 ];
 

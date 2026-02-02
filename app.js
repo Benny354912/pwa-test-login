@@ -123,16 +123,23 @@
       const payload = JSON.parse(decodedText);
       if (!payload?.peerId) throw new Error('Ungültiger QR‑Code');
       lastPayload = payload;
+      console.log('QR gescannt:', payload);
+      updateScanStatus('QR gescannt – verbinde…', 'success');
       connectPeer(payload);
-      updateScanStatus('Verbunden – Login auswählen', 'success');
-      setView('manager');
-    } catch {
+      setTimeout(() => {
+        if (conn && conn.open) {
+          updateScanStatus('Verbunden – Login auswählen', 'success');
+          setView('manager');
+        }
+      }, 500);
+    } catch (err) {
+      console.error('QR Parse error:', err);
       updateScanStatus('Ungültiger QR‑Code', 'warning');
     }
   }
 
   function onScanFailure() {
-    // ignore individual scan errors
+    // Scan failure - continue scanning
   }
 
   function updateScanStatus(text, type) {
