@@ -425,7 +425,8 @@
     
     // Wenn Nachricht verschlüsselt ist, entschlüssele sie
     if (data.encrypted && data.encryptedData && currentKeyPair?.privateKey) {
-      const decrypted = await CryptoUtils.EncryptionUtils.decryptObject(
+      // Nutze sichere Entschlüsselung mit Hybrid-Support
+      const decrypted = await CryptoUtils.EncryptionUtils.decryptObjectSafe(
         currentKeyPair.privateKey,
         data.encryptedData
       );
@@ -463,17 +464,18 @@
   async function sendEncryptedMessage(message) {
     if (!conn?.open) {
       log('Fehler: Keine offene Verbindung');
-      return;
+      return false;
     }
     
     if (!remotePublicKey) {
-      log('Warnung: Remote Public Key nicht verfügbar, sende unverschlüsselt');
-      conn.send(message);
-      return;
+      log('KRITISCHER FEHLER: Remote Public Key nicht verfügbar - kann nicht verschlüsseln');
+      updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
+      return false;
     }
     
     try {
-      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObject(
+      // Nutze sichere Verschlüsselung mit Hybrid-Fallback
+      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObjectSafe(
         remotePublicKey,
         message
       );
@@ -484,13 +486,16 @@
           encryptedData: encryptedData
         });
         log('Verschlüsselte Nachricht gesendet:', message?.type);
+        return true;
       } else {
-        log('Fehler beim Verschlüsseln, sende unverschlüsselt');
-        conn.send(message);
+        log('KRITISCHER FEHLER: Verschlüsselung fehlgeschlagen');
+        updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
+        return false;
       }
     } catch (error) {
-      log('Fehler beim Senden verschlüsselter Nachricht:', error);
-      conn.send(message);
+      log('KRITISCHER FEHLER beim Senden verschlüsselter Nachricht:', error);
+      updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
+      return false;
     }
   }
 
