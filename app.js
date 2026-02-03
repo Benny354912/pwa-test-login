@@ -582,7 +582,7 @@
       log('2FA Verify URL:', url);
       
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'GET',
         headers: {
           'Content-Type': 'application/json',
           'x-session-token': sessionToken
