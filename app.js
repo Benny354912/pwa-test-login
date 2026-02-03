@@ -12,51 +12,47 @@
   };
 
   // ===== TOTP Generator =====
-  const TOTPGenerator = (() => {
-    function base32Decode(str) {
+  const TOTPGenerator = {
+    base32Decode: (str) => {
       const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
       let bits = '';
       for (let i = 0; i < str.length; i++) {
         const idx = alphabet.indexOf(str[i].toUpperCase());
-        if (idx === -1) throw new Error('Invalid Base32 character');
+        if (idx === -1) throw new Error('Invalid base32');
         bits += idx.toString(2).padStart(5, '0');
       }
       const bytes = [];
-      for (let i = 0; i + 8 <= bits.length; i += 8) {
+      for (let i = 0; i < bits.length; i += 8) {
         bytes.push(parseInt(bits.substr(i, 8), 2));
       }
       return new Uint8Array(bytes);
-    }
-
-    async function hmacSha1(key, message) {
-      const keyData = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-      const signature = await crypto.subtle.sign('HMAC', keyData, message);
-      return new Uint8Array(signature);
-    }
-
-    async function generateTOTP(secret, timestamp = Date.now()) {
+    },
+    generate: async (secret) => {
       try {
-        const key = base32Decode(secret.toUpperCase().replace(/\s/g, ''));
-        const counter = Math.floor(timestamp / 1000 / 30);
-        const counterBytes = new Uint8Array(8);
-        for (let i = 0; i < 8; i++) {
-          counterBytes[7 - i] = counter >> (i * 8);
-        }
-        const hmac = await hmacSha1(key, counterBytes);
-        const offset = hmac[hmac.length - 1] & 0x0f;
-        const code = (hmac[offset] & 0x7f) << 24 |
-                     (hmac[offset + 1] & 0xff) << 16 |
-                     (hmac[offset + 2] & 0xff) << 8 |
-                     (hmac[offset + 3] & 0xff);
-        return (code % 1000000).toString().padStart(6, '0');
+        if (!secret) return null;
+        const key = TOTPGenerator.base32Decode(secret);
+        const time = Math.floor(Date.now() / 1000 / 30);
+        const counter = new ArrayBuffer(8);
+        const view = new DataView(counter);
+        view.setBigInt64(0, BigInt(time), false);
+        const key_obj = await crypto.subtle.importKey(
+          'raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+        );
+        const signature = await crypto.subtle.sign('HMAC', key_obj, counter);
+        const bytes = new Uint8Array(signature);
+        const offset = bytes[bytes.length - 1] & 0xf;
+        const dbc = ((bytes[offset] & 0x7f) << 24)
+          | ((bytes[offset + 1] & 0xff) << 16)
+          | ((bytes[offset + 2] & 0xff) << 8)
+          | (bytes[offset + 3] & 0xff);
+        const code = (dbc % 1000000).toString().padStart(6, '0');
+        return code;
       } catch (err) {
         log('TOTP Generate Error:', err);
-        return '';
+        return null;
       }
     }
-
-    return { generateTOTP };
-  })();
+  };
 
   // ===== State =====
   let setupComplete = false;
@@ -524,7 +520,7 @@
       log('Fehler: Login nicht gefunden');
       return;
     }
-    log('Sende Login:', { name: login.name, username: login.username });
+    log('Sende Login:', { name: login.name, username: login.username, has2FA: !!login.twofa });
     sendLogin(login.username, login.password, login.twofa);
   }
 
@@ -574,14 +570,17 @@
       log('Login Response Data:', data);
 
       if (data?.missing2fa) {
-        log('2FA erforderlich');
+        log('2FA erforderlich, twofa Schlüssel vorhanden:', !!twofa);
         if (twofa) {
-          // Wenn 2FA Key vorhanden ist, generiere den aktuellen Code
-          const totpCode = await TOTPGenerator.generateTOTP(twofa);
-          log('2FA TOTP Code generiert:', totpCode.substring(0, 3) + '***');
-          await verify2FA(totpCode, data);
+          const totpCode = await TOTPGenerator.generate(twofa);
+          log('Generierter TOTP Code:', totpCode ? totpCode : 'Fehler');
+          if (totpCode) {
+            await verify2FA(totpCode, data);
+          } else {
+            await show2FADialog(data);
+          }
         } else {
-          show2FADialog(data);
+          await show2FADialog(data);
         }
         return;
       }
@@ -609,11 +608,20 @@
   }
 
   // ===== 2FA Handling =====
-  function show2FADialog(loginData) {
+  async function show2FADialog(loginData, twofa = '') {
     const dialog = document.getElementById('twofa-dialog');
     document.getElementById('twofa-input').value = '';
     dialog.classList.remove('hidden');
     window._current2FAData = loginData;
+    
+    // Wenn 2FA-Schlüssel vorhanden, generiere und prefill Code
+    if (twofa) {
+      const totpCode = await TOTPGenerator.generate(twofa);
+      if (totpCode) {
+        log('Prefill 2FA Dialog mit generiertem Code:', totpCode);
+        document.getElementById('twofa-input').value = totpCode;
+      }
+    }
   }
 
   async function verify2FA(code, loginData) {
@@ -681,16 +689,9 @@
     }
   }
 
-  async function handle2FASubmit() {
-    const codeOrKey = document.getElementById('twofa-input').value;
-    if (codeOrKey && window._current2FAData) {
-      // Wenn es lang ist (>10 Zeichen), ist es wahrscheinlich ein Key, generiere Code
-      let code = codeOrKey;
-      if (codeOrKey.length > 10) {
-        log('2FA Input ist Key, generiere Code...');
-        code = await TOTPGenerator.generateTOTP(codeOrKey);
-        log('2FA Code generiert:', code.substring(0, 3) + '***');
-      }
+  function handle2FASubmit() {
+    const code = document.getElementById('twofa-input').value;
+    if (code && window._current2FAData) {
       verify2FA(code, window._current2FAData);
       document.getElementById('twofa-dialog').classList.add('hidden');
     }
