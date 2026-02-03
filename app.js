@@ -11,49 +11,6 @@
     }
   };
 
-  // ===== TOTP Generator =====
-  const TOTPGenerator = {
-    base32Decode: (str) => {
-      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-      let bits = '';
-      for (let i = 0; i < str.length; i++) {
-        const idx = alphabet.indexOf(str[i].toUpperCase());
-        if (idx === -1) throw new Error('Invalid base32');
-        bits += idx.toString(2).padStart(5, '0');
-      }
-      const bytes = [];
-      for (let i = 0; i < bits.length; i += 8) {
-        bytes.push(parseInt(bits.substr(i, 8), 2));
-      }
-      return new Uint8Array(bytes);
-    },
-    generate: async (secret) => {
-      try {
-        if (!secret) return null;
-        const key = TOTPGenerator.base32Decode(secret);
-        const time = Math.floor(Date.now() / 1000 / 30);
-        const counter = new ArrayBuffer(8);
-        const view = new DataView(counter);
-        view.setBigInt64(0, BigInt(time), false);
-        const key_obj = await crypto.subtle.importKey(
-          'raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
-        );
-        const signature = await crypto.subtle.sign('HMAC', key_obj, counter);
-        const bytes = new Uint8Array(signature);
-        const offset = bytes[bytes.length - 1] & 0xf;
-        const dbc = ((bytes[offset] & 0x7f) << 24)
-          | ((bytes[offset + 1] & 0xff) << 16)
-          | ((bytes[offset + 2] & 0xff) << 8)
-          | (bytes[offset + 3] & 0xff);
-        const code = (dbc % 1000000).toString().padStart(6, '0');
-        return code;
-      } catch (err) {
-        log('TOTP Generate Error:', err);
-        return null;
-      }
-    }
-  };
-
   // ===== State =====
   let setupComplete = false;
   let unlocked = false;
@@ -63,8 +20,7 @@
   let lastPayload = null;
   let logins = [];
   let currentLoginId = null;
-  let currentKeyPair = null; // Aktuelles Public/Private Key Paar
-  let remotePublicKey = null; // Public Key der Remote-Seite
+  let protectionPassword = null; // Speichert das Passwort nach Unlock
 
   const LOGINS_KEY = 'easylogin_logins';
   const SETUP_KEY = 'easylogin_setup_complete';
@@ -72,7 +28,6 @@
   // ===== Initialization =====
   document.addEventListener('DOMContentLoaded', async () => {
     registerServiceWorker();
-    loadLogins();
 
     setupComplete = localStorage.getItem(SETUP_KEY) === 'true';
     if (!setupComplete) {
@@ -105,12 +60,19 @@
     document.getElementById('setup-import-btn')?.addEventListener('click', importLogins);
   }
 
-  function startProtectionSetup(type) {
+  async function startProtectionSetup(type) {
     document.querySelectorAll('.protection-setup').forEach(s => s.classList.add('hidden'));
 
     if (type === 'none') {
+      protectionPassword = null;
+      await CryptoUtils.setProtection('none', '');
       completeSetup();
-    } else if (type === 'pattern') {
+      return;
+    }
+
+    document.querySelector('.setup-container')?.classList.add('hidden');
+
+    if (type === 'pattern') {
       showPatternSetup();
     } else if (type === 'pin') {
       showPinSetup();
@@ -129,6 +91,7 @@
     const handleBack = () => {
       CryptoUtils.PatternLock.resetPattern();
       patternSetup.classList.add('hidden');
+      document.querySelector('.setup-container')?.classList.remove('hidden');
       document.querySelector('#pattern-setup .back-btn').removeEventListener('click', handleBack);
     };
     document.querySelector('#pattern-setup .back-btn')?.addEventListener('click', handleBack);
@@ -145,6 +108,7 @@
 
     const handleNext = async () => {
       await CryptoUtils.setProtection('pattern', pattern);
+      protectionPassword = pattern;
       completeSetup();
       nextBtn.removeEventListener('click', handleNext);
     };
@@ -160,6 +124,7 @@
 
     const handleBack = () => {
       pinSetup.classList.add('hidden');
+      document.querySelector('.setup-container')?.classList.remove('hidden');
       document.querySelector('#pin-setup .back-btn').removeEventListener('click', handleBack);
     };
     document.querySelector('#pin-setup .back-btn')?.addEventListener('click', handleBack);
@@ -172,6 +137,7 @@
         return;
       }
       await CryptoUtils.setProtection('pin', pin);
+      protectionPassword = pin;
       completeSetup();
       nextBtn.removeEventListener('click', handleNext);
     };
@@ -188,6 +154,7 @@
 
     const handleBack = () => {
       passwordSetup.classList.add('hidden');
+      document.querySelector('.setup-container')?.classList.remove('hidden');
       document.querySelector('#password-setup .back-btn').removeEventListener('click', handleBack);
     };
     document.querySelector('#password-setup .back-btn')?.addEventListener('click', handleBack);
@@ -204,6 +171,7 @@
         return;
       }
       await CryptoUtils.setProtection('password', passwordInput.value);
+      protectionPassword = passwordInput.value;
       completeSetup();
       nextBtn.removeEventListener('click', handleNext);
     };
@@ -223,6 +191,8 @@
     const unlockBtn = document.getElementById('unlock-btn');
 
     if (protectionType === 'none') {
+      protectionPassword = null;
+      loadLogins();
       completeUnlock();
       return;
     }
@@ -236,6 +206,8 @@
       const handleUnlock = async () => {
         const pattern = CryptoUtils.PatternLock.getPattern();
         if (await CryptoUtils.verifyProtection(pattern)) {
+          protectionPassword = pattern;
+          await loadLogins();
           completeUnlock();
         } else {
           document.getElementById('pattern-lock-error').textContent = 'Muster falsch';
@@ -249,6 +221,8 @@
       const handleUnlock = async () => {
         const pin = document.getElementById('pin-unlock').value;
         if (await CryptoUtils.verifyProtection(pin)) {
+          protectionPassword = pin;
+          await loadLogins();
           completeUnlock();
         } else {
           document.getElementById('pin-lock-error').textContent = 'PIN falsch';
@@ -261,6 +235,8 @@
       const handleUnlock = async () => {
         const password = document.getElementById('password-unlock').value;
         if (await CryptoUtils.verifyProtection(password)) {
+          protectionPassword = password;
+          await loadLogins();
           completeUnlock();
         } else {
           document.getElementById('password-lock-error').textContent = 'Passwort falsch';
@@ -363,43 +339,18 @@
 
     log('Verbinde zu Peer:', payload.peerId);
     peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
-    peer.on('open', async () => {
+    peer.on('open', () => {
       log('Peer geoeffnet');
-      
-      // Generiere neue Keys für diese Verbindung
-      currentKeyPair = await CryptoUtils.EncryptionUtils.generateKeyPair();
-      if (!currentKeyPair) {
-        log('Fehler: Key Paar konnte nicht generiert werden');
-        return;
-      }
-      log('Neues Key Paar generiert');
-      
       conn = peer.connect(payload.peerId, { reliable: true });
-      conn.on('open', async () => {
-        log('Verbindung offen');
-        
-        // Exportiere Public Key und sende Hello mit Public Key
-        const publicKeyString = await CryptoUtils.EncryptionUtils.exportPublicKey(currentKeyPair.publicKey);
-        conn.send({ 
-          type: 'EasyLoginHello', 
-          client: 'PWA',
-          publicKey: publicKeyString 
-        });
-        log('Hello mit Public Key gesendet');
+      conn.on('open', () => {
+        log('Verbindung offen, sende Hello');
+        conn.send({ type: 'EasyLoginHello', client: 'PWA' });
       });
-      
-      conn.on('data', async (data) => {
-        log('Daten empfangen:', data?.type);
-        await handleEncryptedData(data);
-      });
-      
       conn.on('close', () => {
         log('Verbindung geschlossen');
         updateScanStatus('Verbindung getrennt');
         setMode('camera-mode');
-        cleanupConnection();
       });
-      
       conn.on('error', (err) => {
         log('Verbindungsfehler:', err);
       });
@@ -410,114 +361,54 @@
     });
   }
 
-  /**
-   * Verarbeitet empfangene Daten und entschlüsselt falls nötig
-   */
-  async function handleEncryptedData(data) {
-    if (!data) return;
-    
-    // Wenn Remote Public Key mit Hello kommt, speichere ihn
-    if (data.type === 'EasyLoginHello' && data.publicKey) {
-      remotePublicKey = await CryptoUtils.EncryptionUtils.importPublicKey(data.publicKey);
-      log('Remote Public Key empfangen und gespeichert');
-      return;
-    }
-    
-    // Wenn Nachricht verschlüsselt ist, entschlüssele sie
-    if (data.encrypted && data.encryptedData && currentKeyPair?.privateKey) {
-      const decrypted = await CryptoUtils.EncryptionUtils.decryptObject(
-        currentKeyPair.privateKey,
-        data.encryptedData
-      );
-      
-      if (decrypted) {
-        log('Nachricht entschlüsselt:', decrypted?.type);
-        // Verarbeite die entschlüsselte Nachricht
-        if (decrypted.type === 'EasyLoginResponse') {
-          handleLoginResponse(decrypted);
+  // ===== Login Management =====
+  async function loadLogins() {
+    try {
+      const encryptedData = localStorage.getItem(LOGINS_KEY);
+      if (!encryptedData) {
+        logins = [];
+        return;
+      }
+
+      // Wenn noch kein Passwort vorhanden, Logins unverschlüsselt laden (Legacy)
+      if (!protectionPassword) {
+        try {
+          logins = JSON.parse(encryptedData);
+        } catch {
+          logins = [];
         }
         return;
-      } else {
-        log('Fehler beim Entschlüsseln der Nachricht');
-        return;
       }
-    }
-    
-    // Unverschlüsselte Nachrichten (für Kompatibilität)
-    if (data.type === 'EasyLoginResponse') {
-      handleLoginResponse(data);
-    }
-  }
 
-  /**
-   * Verarbeitet Login-Response
-   */
-  function handleLoginResponse(data) {
-    // Hier wird die ursprüngliche Logik ausgeführt
-    // Diese Funktion wird aus den bestehenden Funktionen aufgerufen
-  }
-
-  /**
-   * Sendet verschlüsselte Nachricht über PeerJS
-   */
-  async function sendEncryptedMessage(message) {
-    if (!conn?.open) {
-      log('Fehler: Keine offene Verbindung');
-      return;
-    }
-    
-    if (!remotePublicKey) {
-      log('Fehler: Remote Public Key nicht verfügbar - Verschlüsselung unmöglich');
-      throw new Error('Verschlüsselung fehlgeschlagen: Kein Remote Public Key verfügbar');
-    }
-    
-    try {
-      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObject(
-        remotePublicKey,
-        message
-      );
-      
-      if (encryptedData) {
-        conn.send({
-          encrypted: true,
-          encryptedData: encryptedData
-        });
-        log('Verschlüsselte Nachricht gesendet:', message?.type);
-      } else {
-        log('Fehler: Verschlüsselung ergab keine Daten');
-        throw new Error('Verschlüsselung fehlgeschlagen: Keine Daten zurückgegeben');
-      }
-    } catch (error) {
-      log('Fehler beim Senden verschlüsselter Nachricht:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Schließt die Verbindung sauber
-   */
-  function cleanupConnection() {
-    if (conn?.open) {
+      // Versuche zu entschlüsseln
       try {
-        conn.close();
-      } catch {}
-    }
-    conn = null;
-    currentKeyPair = null;
-    remotePublicKey = null;
-  }
-
-  // ===== Login Management =====
-  function loadLogins() {
-    try {
-      logins = JSON.parse(localStorage.getItem(LOGINS_KEY) || '[]');
-    } catch {
+        const decrypted = await CryptoUtils.decryptData(encryptedData, protectionPassword);
+        logins = JSON.parse(decrypted);
+      } catch (err) {
+        log('Fehler beim Entschlüsseln:', err);
+        logins = [];
+      }
+    } catch (err) {
+      log('Fehler beim Laden der Logins:', err);
       logins = [];
     }
   }
 
-  function saveLogins() {
-    localStorage.setItem(LOGINS_KEY, JSON.stringify(logins));
+  async function saveLogins() {
+    try {
+      const jsonData = JSON.stringify(logins);
+      
+      // Verschlüssele wenn Passwort vorhanden
+      if (protectionPassword && CryptoUtils.getProtectionType() !== 'none') {
+        const encrypted = await CryptoUtils.encryptData(jsonData, protectionPassword);
+        localStorage.setItem(LOGINS_KEY, encrypted.data);
+      } else {
+        // Keine Verschlüsselung
+        localStorage.setItem(LOGINS_KEY, jsonData);
+      }
+    } catch (err) {
+      log('Fehler beim Speichern der Logins:', err);
+    }
   }
 
   function renderLoginsList() {
@@ -575,7 +466,7 @@
     document.getElementById('login-form-container').classList.remove('hidden');
   }
 
-  function handleLoginFormSubmit(e) {
+  async function handleLoginFormSubmit(e) {
     e.preventDefault();
     const id = document.getElementById('login-id').value || generateId();
     const name = document.getElementById('login-name').value.trim();
@@ -595,17 +486,17 @@
       logins.push(login);
     }
 
-    saveLogins();
+    await saveLogins();
     renderLoginsList();
     document.getElementById('login-form-container').classList.add('hidden');
   }
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     if (e.target.id === 'delete-login-btn') {
       e.preventDefault();
       const id = document.getElementById('login-id').value;
       logins = logins.filter(l => l.id !== id);
-      saveLogins();
+      await saveLogins();
       renderLoginsList();
       document.getElementById('login-form-container').classList.add('hidden');
     }
@@ -644,7 +535,7 @@
       log('Fehler: Login nicht gefunden');
       return;
     }
-    log('Sende Login:', { name: login.name, username: login.username, has2FA: !!login.twofa });
+    log('Sende Login:', { name: login.name, username: login.username });
     sendLogin(login.username, login.password, login.twofa);
   }
 
@@ -694,155 +585,43 @@
       log('Login Response Data:', data);
 
       if (data?.missing2fa) {
-        log('2FA erforderlich, twofa Schlüssel vorhanden:', !!twofa);
-        
-        // Sende Login-Response mit missing2FA=true an Erweiterung, wenn kein 2FA-Schlüssel vorhanden
-        if (!twofa) {
-          log('Kein 2FA Schlüssel vorhanden - sende Login mit missing2FA=true an Erweiterung');
-          try {
-            await sendEncryptedMessage({
-              type: 'EasyLoginResponse',
-              success: false,
-              missing2fa: true,
-              session: data,
-              host: lastPayload.host,
-              ref: lastPayload.ref
-            });
-          } catch (encryptError) {
-            log('Verschlüsselung für 2FA-Response fehlgeschlagen:', encryptError);
-            const allowUnencrypted = confirm(
-              'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Nachricht unverschlüsselt senden? Warnung: Dies ist unsicher!'
-            );
-            if (allowUnencrypted && conn?.open) {
-              conn.send({
-                type: 'EasyLoginResponse',
-                success: false,
-                missing2fa: true,
-                session: data,
-                host: lastPayload.host,
-                ref: lastPayload.ref
-              });
-              log('2FA-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
-            } else {
-              log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
-              updateScanStatus('Fehler: Verschlüsselung erforderlich');
-              return;
-            }
-          }
-        }
-        
-        // Manuelle 2FA-Eingabe ermöglichen
+        log('2FA erforderlich');
         if (twofa) {
-          const totpCode = await TOTPGenerator.generate(twofa);
-          log('Generierter TOTP Code:', totpCode ? totpCode : 'Fehler');
-          if (totpCode) {
-            await verify2FA(totpCode, data);
-          } else {
-            await show2FADialog(data);
-          }
+          await verify2FA(twofa, data);
         } else {
-          await show2FADialog(data);
+          show2FADialog(data);
         }
         return;
       }
 
       log('Sende EasyLoginResponse mit success:', response.ok);
-      try {
-        await sendEncryptedMessage({
-          type: 'EasyLoginResponse',
-          success: response.ok,
-          session: data,
-          host: lastPayload.host,
-          ref: lastPayload.ref
-        });
-        
-        if (response.ok) {
-          log('Login erfolgreich - Verschlüsselte Nachricht gesendet');
-          updateScanStatus('Login erfolgreich');
-          setMode('camera-mode');
-          
-          // Warte kurz, dann schließe Verbindung sauber
-          setTimeout(() => {
-            cleanupConnection();
-          }, 1000);
-        } else {
-          setMode('camera-mode');
-        }
-      } catch (encryptError) {
-        log('Verschlüsselung für Login-Response fehlgeschlagen:', encryptError);
-        const allowUnencrypted = confirm(
-          'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Anmeldedaten unverschlüsselt senden? Warnung: Dies ist unsicher!'
-        );
-        
-        if (allowUnencrypted && conn?.open) {
-          conn.send({
-            type: 'EasyLoginResponse',
-            success: response.ok,
-            session: data,
-            host: lastPayload.host,
-            ref: lastPayload.ref
-          });
-          log('Login-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
-          
-          if (response.ok) {
-            updateScanStatus('Login erfolgreich (unverschlüsselt)');
-            setTimeout(() => {
-              cleanupConnection();
-            }, 1000);
-          }
-        } else {
-          log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
-          updateScanStatus('Fehler: Verschlüsselung erforderlich');
-        }
-        setMode('camera-mode');
-      }
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: response.ok,
+        session: data,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
+
+      setMode('camera-mode');
     } catch (error) {
       log('Fehler bei sendLogin:', error);
-      try {
-        await sendEncryptedMessage({
-          type: 'EasyLoginResponse',
-          success: false,
-          error: error?.message,
-          host: lastPayload.host,
-          ref: lastPayload.ref
-        });
-      } catch (encryptError) {
-        log('Verschlüsselung für Fehler-Response fehlgeschlagen:', encryptError);
-        const allowUnencrypted = confirm(
-          'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie den Fehler unverschlüsselt senden? Warnung: Dies ist unsicher!'
-        );
-        
-        if (allowUnencrypted && conn?.open) {
-          conn.send({
-            type: 'EasyLoginResponse',
-            success: false,
-            error: error?.message,
-            host: lastPayload.host,
-            ref: lastPayload.ref
-          });
-          log('Fehler-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
-        } else {
-          log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
-        }
-      }
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: false,
+        error: error?.message,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
     }
   }
 
   // ===== 2FA Handling =====
-  async function show2FADialog(loginData, twofa = '') {
+  function show2FADialog(loginData) {
     const dialog = document.getElementById('twofa-dialog');
     document.getElementById('twofa-input').value = '';
     dialog.classList.remove('hidden');
     window._current2FAData = loginData;
-    
-    // Wenn 2FA-Schlüssel vorhanden, generiere und prefill Code
-    if (twofa) {
-      const totpCode = await TOTPGenerator.generate(twofa);
-      if (totpCode) {
-        log('Prefill 2FA Dialog mit generiertem Code:', totpCode);
-        document.getElementById('twofa-input').value = totpCode;
-      }
-    }
   }
 
   async function verify2FA(code, loginData) {
@@ -854,26 +633,30 @@
     log('Verifiziere 2FA mit Code:', code);
 
     try {
-      // sessionid aus der Login Response auslesen
-      const sessionToken = loginData.sessionid || '';
-      log('2FA Session Token (sessionid):', sessionToken ? sessionToken.substring(0, 20) + '...' : 'FEHLT');
-      
-      if (!sessionToken) {
-        log('Fehler: Keine sessionid in loginData gefunden');
-        updateScanStatus('2FA Fehler: Keine Session');
-        setMode('camera-mode');
-        return;
-      }
+      const sessionToken =
+        loginData?.sessionToken ||
+        loginData?.sessionId ||
+        loginData?.sessionid ||
+        loginData?.token ||
+        loginData?.session?.token ||
+        loginData?.session?.sessionToken ||
+        loginData?.session?.sessionId ||
+        loginData?.session?.sessionid ||
+        loginData?.session?.id ||
+        '';
+      log('2FA Session Token:', sessionToken ? 'vorhanden' : 'FEHLT');
       
       const url = `https://${lastPayload.host}/api/session/verify2fa/all/${code}`;
       log('2FA Verify URL:', url);
-      log('2FA Request Header x-session-token:', sessionToken.substring(0, 20) + '...');
       
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-session-token': sessionToken
+      };
+
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'x-session-token': sessionToken
-        }
+        headers
       });
 
       log('2FA Response Status:', response.status);
@@ -890,49 +673,14 @@
       log('2FA Verify Data:', verifyData);
 
       if (response.ok) {
-        try {
-          await sendEncryptedMessage({
-            type: 'EasyLoginResponse',
-            success: true,
-            session: verifyData || loginData,
-            host: lastPayload.host,
-            ref: lastPayload.ref
-          });
-          log('2FA erfolgreich - Verschlüsselte Nachricht gesendet');
-          updateScanStatus('Login erfolgreich');
-          setMode('camera-mode');
-          
-          // Warte kurz, dann schließe Verbindung sauber
-          setTimeout(() => {
-            cleanupConnection();
-          }, 1000);
-        } catch (encryptError) {
-          log('2FA Verschlüsselung fehlgeschlagen:', encryptError);
-          const allowUnencrypted = confirm(
-            'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Anmeldedaten unverschlüsselt senden? Warnung: Dies ist unsicher!'
-          );
-          
-          if (allowUnencrypted && conn?.open) {
-            conn.send({
-              type: 'EasyLoginResponse',
-              success: true,
-              session: verifyData || loginData,
-              host: lastPayload.host,
-              ref: lastPayload.ref
-            });
-            log('2FA erfolgreich - Unverschlüsselte Nachricht gesendet (mit Benutzerbestätigung)');
-            updateScanStatus('Login erfolgreich (unverschlüsselt)');
-            setMode('camera-mode');
-            
-            setTimeout(() => {
-              cleanupConnection();
-            }, 1000);
-          } else {
-            log('2FA abgebrochen - Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
-            updateScanStatus('Login abgebrochen - Verschlüsselung erforderlich');
-            setMode('camera-mode');
-          }
-        }
+        conn.send({
+          type: 'EasyLoginResponse',
+          success: true,
+          session: verifyData || loginData,
+          host: lastPayload.host,
+          ref: lastPayload.ref
+        });
+        setMode('camera-mode');
       } else {
         log('2FA Verifizierung fehlgeschlagen');
         updateScanStatus('2FA Verifizierung fehlgeschlagen');
@@ -974,12 +722,12 @@
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         try {
           const imported = JSON.parse(event.target?.result || '[]');
           if (Array.isArray(imported)) {
             logins = imported;
-            saveLogins();
+            await saveLogins();
             completeSetup();
           }
         } catch (err) {

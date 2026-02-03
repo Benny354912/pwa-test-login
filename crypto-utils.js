@@ -3,6 +3,7 @@ const CryptoUtils = (() => {
   const PROTECTION_KEY = 'easylogin_protection';
   const HASH_KEY = 'easylogin_hash';
   const SALT_KEY = 'easylogin_salt';
+  const ENCRYPTION_METHOD_KEY = 'easylogin_enc_method'; // 'none' oder 'aes-gcm'
 
   /**
    * Hasht einen String mit SHA-256
@@ -25,6 +26,122 @@ const CryptoUtils = (() => {
   }
 
   /**
+   * Leitet einen Verschlüsselungsschlüssel aus einem Passwort ab
+   * Nutzt PBKDF2 für sichere Key-Derivation
+   */
+  async function deriveEncryptionKey(password, salt) {
+    const encoder = new TextEncoder();
+    const passwordData = encoder.encode(password);
+    const saltData = encoder.encode(salt);
+
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      passwordData,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits', 'deriveKey']
+    );
+
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: saltData,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  /**
+   * Verschlüsselt einen String mit AES-GCM
+   */
+  async function encryptData(data, password) {
+    if (!password) {
+      // Kein Passwort = keine Verschlüsselung
+      return {
+        encrypted: false,
+        data: data
+      };
+    }
+
+    try {
+      const salt = generateSalt();
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      
+      const key = await deriveEncryptionKey(password, salt);
+      const encoder = new TextEncoder();
+      const encodedData = encoder.encode(data);
+
+      const encryptedBuffer = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        encodedData
+      );
+
+      // Kombiniere salt + iv + encrypted data
+      const combined = new Uint8Array(salt.length / 2 + 12 + encryptedBuffer.byteLength);
+      const saltBytes = new Uint8Array(salt.length / 2);
+      for (let i = 0; i < salt.length; i += 2) {
+        saltBytes[i / 2] = parseInt(salt.substr(i, 2), 16);
+      }
+      combined.set(saltBytes, 0);
+      combined.set(iv, saltBytes.length);
+      combined.set(new Uint8Array(encryptedBuffer), saltBytes.length + 12);
+
+      return {
+        encrypted: true,
+        data: Array.from(combined)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+      };
+    } catch (err) {
+      console.error('Encryption error:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Entschlüsselt einen String mit AES-GCM
+   */
+  async function decryptData(encryptedHex, password) {
+    if (!password) {
+      return encryptedHex;
+    }
+
+    try {
+      // Parse: first 16 bytes = salt, next 12 bytes = iv, rest = encrypted
+      const bytes = [];
+      for (let i = 0; i < encryptedHex.length; i += 2) {
+        bytes.push(parseInt(encryptedHex.substr(i, 2), 16));
+      }
+
+      const saltBytes = bytes.slice(0, 16);
+      const ivBytes = bytes.slice(16, 28);
+      const encryptedBytes = bytes.slice(28);
+
+      const salt = Array.from(saltBytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      const key = await deriveEncryptionKey(password, salt);
+      const decryptedBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(ivBytes) },
+        key,
+        new Uint8Array(encryptedBytes)
+      );
+
+      return new TextDecoder().decode(decryptedBuffer);
+    } catch (err) {
+      console.error('Decryption error:', err);
+      throw err;
+    }
+  }
+
+  /**
    * Speichert die Schutz-Einstellung
    */
   async function setProtection(type, value) {
@@ -34,6 +151,9 @@ const CryptoUtils = (() => {
     localStorage.setItem(PROTECTION_KEY, type);
     localStorage.setItem(HASH_KEY, hash);
     localStorage.setItem(SALT_KEY, salt);
+    
+    // Speichere dass wir AES-GCM Verschlüsselung nutzen
+    localStorage.setItem(ENCRYPTION_METHOD_KEY, type === 'none' ? 'none' : 'aes-gcm');
   }
 
   /**
@@ -210,224 +330,6 @@ const CryptoUtils = (() => {
     };
   })();
 
-  // ===== Public/Private Key Encryption =====
-  const EncryptionUtils = (() => {
-    /**
-     * Generiert ein neues Public/Private Key Paar (RSA-OAEP)
-     */
-    async function generateKeyPair() {
-      try {
-        const keyPair = await crypto.subtle.generateKey(
-          {
-            name: 'RSA-OAEP',
-            modulusLength: 2048,
-            publicExponent: new Uint8Array([1, 0, 1]), // 65537
-            hash: 'SHA-256'
-          },
-          true, // extractable
-          ['encrypt', 'decrypt']
-        );
-        return keyPair;
-      } catch (error) {
-        console.error('Fehler beim Generieren des Key Paares:', error);
-        return null;
-      }
-    }
-
-    /**
-     * Exportiert einen Public Key in JWK Format
-     */
-    async function exportPublicKey(publicKey) {
-      try {
-        const jwk = await crypto.subtle.exportKey('jwk', publicKey);
-        return JSON.stringify(jwk);
-      } catch (error) {
-        console.error('Fehler beim Exportieren des Public Keys:', error);
-        return null;
-      }
-    }
-
-    /**
-     * Importiert einen Public Key aus JWK Format
-     */
-    async function importPublicKey(jwkString) {
-      try {
-        const jwk = JSON.parse(jwkString);
-        const publicKey = await crypto.subtle.importKey(
-          'jwk',
-          jwk,
-          {
-            name: 'RSA-OAEP',
-            hash: 'SHA-256'
-          },
-          true,
-          ['encrypt']
-        );
-        return publicKey;
-      } catch (error) {
-        console.error('Fehler beim Importieren des Public Keys:', error);
-        return null;
-      }
-    }
-
-    /**
-     * Verschlüsselt einen Text mit einem Public Key (Hybrid: AES + RSA)
-     * Verwendet AES-GCM für die Daten und RSA-OAEP für den AES-Schlüssel
-     */
-    async function encryptWithPublicKey(publicKey, text) {
-      try {
-        // 1. Generiere einen zufälligen AES-Schlüssel
-        const aesKey = await crypto.subtle.generateKey(
-          { name: 'AES-GCM', length: 256 },
-          true,
-          ['encrypt', 'decrypt']
-        );
-        
-        // 2. Generiere einen zufälligen IV für AES
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        
-        // 3. Verschlüssele die Daten mit AES-GCM
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const encryptedData = await crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv: iv },
-          aesKey,
-          data
-        );
-        
-        // 4. Exportiere den AES-Schlüssel als Raw-Format
-        const aesKeyRaw = await crypto.subtle.exportKey('raw', aesKey);
-        
-        // 5. Verschlüssele den AES-Schlüssel mit RSA
-        const encryptedAesKey = await crypto.subtle.encrypt(
-          'RSA-OAEP',
-          publicKey,
-          aesKeyRaw
-        );
-        
-        // 6. Kombiniere alles: verschlüsselter AES-Schlüssel + IV + verschlüsselte Daten
-        const result = {
-          encryptedKey: btoa(String.fromCharCode(...new Uint8Array(encryptedAesKey))),
-          iv: btoa(String.fromCharCode(...iv)),
-          data: btoa(String.fromCharCode(...new Uint8Array(encryptedData)))
-        };
-        
-        return JSON.stringify(result);
-      } catch (error) {
-        console.error('Fehler beim Verschlüsseln:', error);
-        return null;
-      }
-    }
-
-    /**
-     * Entschlüsselt einen Text mit einem Private Key (Hybrid: AES + RSA)
-     * Erwartet ein JSON-Objekt mit encryptedKey, iv und data
-     */
-    async function decryptWithPrivateKey(privateKey, encryptedBase64) {
-      try {
-        // Parse das verschlüsselte Objekt
-        let encryptedObj;
-        try {
-          encryptedObj = JSON.parse(encryptedBase64);
-        } catch {
-          // Fallback für altes Format (direkt RSA-verschlüsselt)
-          try {
-            const encryptedData = Uint8Array.from(
-              atob(encryptedBase64),
-              c => c.charCodeAt(0)
-            );
-            const decryptedBuffer = await crypto.subtle.decrypt(
-              'RSA-OAEP',
-              privateKey,
-              encryptedData
-            );
-            const decoder = new TextDecoder();
-            return decoder.decode(decryptedBuffer);
-          } catch (legacyError) {
-            console.error('Fehler beim Entschlüsseln (Legacy-Format):', legacyError);
-            return null;
-          }
-        }
-        
-        // Neues Hybrid-Format
-        // 1. Konvertiere die Base64-Strings zurück zu Uint8Arrays
-        const encryptedKey = Uint8Array.from(
-          atob(encryptedObj.encryptedKey),
-          c => c.charCodeAt(0)
-        );
-        const iv = Uint8Array.from(
-          atob(encryptedObj.iv),
-          c => c.charCodeAt(0)
-        );
-        const encryptedData = Uint8Array.from(
-          atob(encryptedObj.data),
-          c => c.charCodeAt(0)
-        );
-        
-        // 2. Entschlüssele den AES-Schlüssel mit RSA
-        const aesKeyRaw = await crypto.subtle.decrypt(
-          'RSA-OAEP',
-          privateKey,
-          encryptedKey
-        );
-        
-        // 3. Importiere den AES-Schlüssel
-        const aesKey = await crypto.subtle.importKey(
-          'raw',
-          aesKeyRaw,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['decrypt']
-        );
-        
-        // 4. Entschlüssele die Daten mit AES-GCM
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: iv },
-          aesKey,
-          encryptedData
-        );
-        
-        const decoder = new TextDecoder();
-        return decoder.decode(decryptedBuffer);
-      } catch (error) {
-        console.error('Fehler beim Entschlüsseln:', error);
-        return null;
-      }
-    }
-
-    /**
-     * Verschlüsselt ein Objekt mit einem Public Key
-     */
-    async function encryptObject(publicKey, obj) {
-      const jsonString = JSON.stringify(obj);
-      return await encryptWithPublicKey(publicKey, jsonString);
-    }
-
-    /**
-     * Entschlüsselt ein Objekt mit einem Private Key
-     */
-    async function decryptObject(privateKey, encryptedBase64) {
-      const decrypted = await decryptWithPrivateKey(privateKey, encryptedBase64);
-      if (!decrypted) return null;
-      try {
-        return JSON.parse(decrypted);
-      } catch (error) {
-        console.error('Fehler beim Parsen des entschlüsselten Objekts:', error);
-        return null;
-      }
-    }
-
-    return {
-      generateKeyPair,
-      exportPublicKey,
-      importPublicKey,
-      encryptWithPublicKey,
-      decryptWithPrivateKey,
-      encryptObject,
-      decryptObject
-    };
-  })();
-
   return {
     hashValue,
     generateSalt,
@@ -436,7 +338,9 @@ const CryptoUtils = (() => {
     verifyProtection,
     clearProtection,
     isProtected,
-    PatternLock,
-    EncryptionUtils
+    encryptData,
+    decryptData,
+    deriveEncryptionKey,
+    PatternLock
   };
 })();
