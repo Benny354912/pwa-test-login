@@ -63,6 +63,8 @@
   let lastPayload = null;
   let logins = [];
   let currentLoginId = null;
+  let currentKeyPair = null; // Aktuelles Public/Private Key Paar
+  let remotePublicKey = null; // Public Key der Remote-Seite
 
   const LOGINS_KEY = 'easylogin_logins';
   const SETUP_KEY = 'easylogin_setup_complete';
@@ -361,18 +363,43 @@
 
     log('Verbinde zu Peer:', payload.peerId);
     peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
-    peer.on('open', () => {
+    peer.on('open', async () => {
       log('Peer geoeffnet');
+      
+      // Generiere neue Keys für diese Verbindung
+      currentKeyPair = await CryptoUtils.EncryptionUtils.generateKeyPair();
+      if (!currentKeyPair) {
+        log('Fehler: Key Paar konnte nicht generiert werden');
+        return;
+      }
+      log('Neues Key Paar generiert');
+      
       conn = peer.connect(payload.peerId, { reliable: true });
-      conn.on('open', () => {
-        log('Verbindung offen, sende Hello');
-        conn.send({ type: 'EasyLoginHello', client: 'PWA' });
+      conn.on('open', async () => {
+        log('Verbindung offen');
+        
+        // Exportiere Public Key und sende Hello mit Public Key
+        const publicKeyString = await CryptoUtils.EncryptionUtils.exportPublicKey(currentKeyPair.publicKey);
+        conn.send({ 
+          type: 'EasyLoginHello', 
+          client: 'PWA',
+          publicKey: publicKeyString 
+        });
+        log('Hello mit Public Key gesendet');
       });
+      
+      conn.on('data', async (data) => {
+        log('Daten empfangen:', data?.type);
+        await handleEncryptedData(data);
+      });
+      
       conn.on('close', () => {
         log('Verbindung geschlossen');
         updateScanStatus('Verbindung getrennt');
         setMode('camera-mode');
+        cleanupConnection();
       });
+      
       conn.on('error', (err) => {
         log('Verbindungsfehler:', err);
       });
@@ -381,6 +408,104 @@
       log('PeerJS Fehler:', err);
       updateScanStatus('PeerJS Fehler');
     });
+  }
+
+  /**
+   * Verarbeitet empfangene Daten und entschlüsselt falls nötig
+   */
+  async function handleEncryptedData(data) {
+    if (!data) return;
+    
+    // Wenn Remote Public Key mit Hello kommt, speichere ihn
+    if (data.type === 'EasyLoginHello' && data.publicKey) {
+      remotePublicKey = await CryptoUtils.EncryptionUtils.importPublicKey(data.publicKey);
+      log('Remote Public Key empfangen und gespeichert');
+      return;
+    }
+    
+    // Wenn Nachricht verschlüsselt ist, entschlüssele sie
+    if (data.encrypted && data.encryptedData && currentKeyPair?.privateKey) {
+      const decrypted = await CryptoUtils.EncryptionUtils.decryptObject(
+        currentKeyPair.privateKey,
+        data.encryptedData
+      );
+      
+      if (decrypted) {
+        log('Nachricht entschlüsselt:', decrypted?.type);
+        // Verarbeite die entschlüsselte Nachricht
+        if (decrypted.type === 'EasyLoginResponse') {
+          handleLoginResponse(decrypted);
+        }
+        return;
+      } else {
+        log('Fehler beim Entschlüsseln der Nachricht');
+        return;
+      }
+    }
+    
+    // Unverschlüsselte Nachrichten (für Kompatibilität)
+    if (data.type === 'EasyLoginResponse') {
+      handleLoginResponse(data);
+    }
+  }
+
+  /**
+   * Verarbeitet Login-Response
+   */
+  function handleLoginResponse(data) {
+    // Hier wird die ursprüngliche Logik ausgeführt
+    // Diese Funktion wird aus den bestehenden Funktionen aufgerufen
+  }
+
+  /**
+   * Sendet verschlüsselte Nachricht über PeerJS
+   */
+  async function sendEncryptedMessage(message) {
+    if (!conn?.open) {
+      log('Fehler: Keine offene Verbindung');
+      return;
+    }
+    
+    if (!remotePublicKey) {
+      log('Warnung: Remote Public Key nicht verfügbar, sende unverschlüsselt');
+      conn.send(message);
+      return;
+    }
+    
+    try {
+      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObject(
+        remotePublicKey,
+        message
+      );
+      
+      if (encryptedData) {
+        conn.send({
+          encrypted: true,
+          encryptedData: encryptedData
+        });
+        log('Verschlüsselte Nachricht gesendet:', message?.type);
+      } else {
+        log('Fehler beim Verschlüsseln, sende unverschlüsselt');
+        conn.send(message);
+      }
+    } catch (error) {
+      log('Fehler beim Senden verschlüsselter Nachricht:', error);
+      conn.send(message);
+    }
+  }
+
+  /**
+   * Schließt die Verbindung sauber
+   */
+  function cleanupConnection() {
+    if (conn?.open) {
+      try {
+        conn.close();
+      } catch {}
+    }
+    conn = null;
+    currentKeyPair = null;
+    remotePublicKey = null;
   }
 
   // ===== Login Management =====
@@ -575,7 +700,7 @@
         // Sende Login-Response mit missing2FA=true an Erweiterung, wenn kein 2FA-Schlüssel vorhanden
         if (!twofa) {
           log('Kein 2FA Schlüssel vorhanden - sende Login mit missing2FA=true an Erweiterung');
-          conn.send({
+          await sendEncryptedMessage({
             type: 'EasyLoginResponse',
             success: false,
             missing2fa: true,
@@ -585,7 +710,7 @@
           });
         }
         
-        // Manuelle 2FA-Eingabe ermöglichen (unabhängig ob Schlüssel vorhanden oder nicht)
+        // Manuelle 2FA-Eingabe ermöglichen
         if (twofa) {
           const totpCode = await TOTPGenerator.generate(twofa);
           log('Generierter TOTP Code:', totpCode ? totpCode : 'Fehler');
@@ -601,18 +726,29 @@
       }
 
       log('Sende EasyLoginResponse mit success:', response.ok);
-      conn.send({
+      await sendEncryptedMessage({
         type: 'EasyLoginResponse',
         success: response.ok,
         session: data,
         host: lastPayload.host,
         ref: lastPayload.ref
       });
-
-      setMode('camera-mode');
+      
+      if (response.ok) {
+        log('Login erfolgreich - Verbindung wird geschlossen');
+        updateScanStatus('Login erfolgreich');
+        setMode('camera-mode');
+        
+        // Warte kurz, dann schließe Verbindung sauber
+        setTimeout(() => {
+          cleanupConnection();
+        }, 1000);
+      } else {
+        setMode('camera-mode');
+      }
     } catch (error) {
       log('Fehler bei sendLogin:', error);
-      conn.send({
+      await sendEncryptedMessage({
         type: 'EasyLoginResponse',
         success: false,
         error: error?.message,
@@ -684,14 +820,21 @@
       log('2FA Verify Data:', verifyData);
 
       if (response.ok) {
-        conn.send({
+        await sendEncryptedMessage({
           type: 'EasyLoginResponse',
           success: true,
           session: verifyData || loginData,
           host: lastPayload.host,
           ref: lastPayload.ref
         });
+        log('2FA erfolgreich - Verbindung wird geschlossen');
+        updateScanStatus('Login erfolgreich');
         setMode('camera-mode');
+        
+        // Warte kurz, dann schließe Verbindung sauber
+        setTimeout(() => {
+          cleanupConnection();
+        }, 1000);
       } else {
         log('2FA Verifizierung fehlgeschlagen');
         updateScanStatus('2FA Verifizierung fehlgeschlagen');

@@ -210,6 +210,142 @@ const CryptoUtils = (() => {
     };
   })();
 
+  // ===== Public/Private Key Encryption =====
+  const EncryptionUtils = (() => {
+    /**
+     * Generiert ein neues Public/Private Key Paar (RSA-OAEP)
+     */
+    async function generateKeyPair() {
+      try {
+        const keyPair = await crypto.subtle.generateKey(
+          {
+            name: 'RSA-OAEP',
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([1, 0, 1]), // 65537
+            hash: 'SHA-256'
+          },
+          true, // extractable
+          ['encrypt', 'decrypt']
+        );
+        return keyPair;
+      } catch (error) {
+        console.error('Fehler beim Generieren des Key Paares:', error);
+        return null;
+      }
+    }
+
+    /**
+     * Exportiert einen Public Key in JWK Format
+     */
+    async function exportPublicKey(publicKey) {
+      try {
+        const jwk = await crypto.subtle.exportKey('jwk', publicKey);
+        return JSON.stringify(jwk);
+      } catch (error) {
+        console.error('Fehler beim Exportieren des Public Keys:', error);
+        return null;
+      }
+    }
+
+    /**
+     * Importiert einen Public Key aus JWK Format
+     */
+    async function importPublicKey(jwkString) {
+      try {
+        const jwk = JSON.parse(jwkString);
+        const publicKey = await crypto.subtle.importKey(
+          'jwk',
+          jwk,
+          {
+            name: 'RSA-OAEP',
+            hash: 'SHA-256'
+          },
+          true,
+          ['encrypt']
+        );
+        return publicKey;
+      } catch (error) {
+        console.error('Fehler beim Importieren des Public Keys:', error);
+        return null;
+      }
+    }
+
+    /**
+     * Verschlüsselt einen Text mit einem Public Key
+     */
+    async function encryptWithPublicKey(publicKey, text) {
+      try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(text);
+        const encryptedBuffer = await crypto.subtle.encrypt(
+          'RSA-OAEP',
+          publicKey,
+          data
+        );
+        // Konvertiere zu Base64 für Transport
+        return btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+      } catch (error) {
+        console.error('Fehler beim Verschlüsseln:', error);
+        return null;
+      }
+    }
+
+    /**
+     * Entschlüsselt einen Text mit einem Private Key
+     */
+    async function decryptWithPrivateKey(privateKey, encryptedBase64) {
+      try {
+        // Konvertiere von Base64
+        const encryptedData = Uint8Array.from(
+          atob(encryptedBase64),
+          c => c.charCodeAt(0)
+        );
+        const decryptedBuffer = await crypto.subtle.decrypt(
+          'RSA-OAEP',
+          privateKey,
+          encryptedData
+        );
+        const decoder = new TextDecoder();
+        return decoder.decode(decryptedBuffer);
+      } catch (error) {
+        console.error('Fehler beim Entschlüsseln:', error);
+        return null;
+      }
+    }
+
+    /**
+     * Verschlüsselt ein Objekt mit einem Public Key
+     */
+    async function encryptObject(publicKey, obj) {
+      const jsonString = JSON.stringify(obj);
+      return await encryptWithPublicKey(publicKey, jsonString);
+    }
+
+    /**
+     * Entschlüsselt ein Objekt mit einem Private Key
+     */
+    async function decryptObject(privateKey, encryptedBase64) {
+      const decrypted = await decryptWithPrivateKey(privateKey, encryptedBase64);
+      if (!decrypted) return null;
+      try {
+        return JSON.parse(decrypted);
+      } catch (error) {
+        console.error('Fehler beim Parsen des entschlüsselten Objekts:', error);
+        return null;
+      }
+    }
+
+    return {
+      generateKeyPair,
+      exportPublicKey,
+      importPublicKey,
+      encryptWithPublicKey,
+      decryptWithPrivateKey,
+      encryptObject,
+      decryptObject
+    };
+  })();
+
   return {
     hashValue,
     generateSalt,
@@ -218,6 +354,7 @@ const CryptoUtils = (() => {
     verifyProtection,
     clearProtection,
     isProtected,
-    PatternLock
+    PatternLock,
+    EncryptionUtils
   };
 })();
