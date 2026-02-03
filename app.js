@@ -573,10 +573,20 @@
     }
 
     log('Verifiziere 2FA mit Code:', code);
+    log('LoginData Komplett:', loginData);
 
     try {
-      const sessionToken = loginData.sessionToken || loginData.sessionId || loginData.token || '';
-      log('2FA Session Token:', sessionToken ? 'vorhanden' : 'FEHLT');
+      // Versuche alle möglichen Token-Felder zu finden
+      const sessionToken = loginData.sessionToken 
+        || loginData.sessionId 
+        || loginData.token 
+        || loginData.session?.sessionToken 
+        || loginData.session?.token
+        || loginData.session?.sessionId
+        || '';
+      
+      log('2FA Session Token gefunden:', sessionToken ? sessionToken.substring(0, 20) + '...' : 'FEHLT');
+      log('LoginData Keys:', Object.keys(loginData));
       
       const url = `https://${lastPayload.host}/api/session/verify2fa/all/${code}`;
       log('2FA Verify URL:', url);
