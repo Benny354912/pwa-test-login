@@ -1,5 +1,16 @@
 /* Easy Login PWA - Moderne Version mit Setup, Lock Screen & 2FA */
 (() => {
+  // ===== Debug Mode =====
+  const DEBUG = true;
+  const log = (msg, data) => {
+    if (!DEBUG) return;
+    if (data) {
+      console.log('%c[PWA-EasyLogin]', 'color: #22c55e; font-weight: bold;', msg, data);
+    } else {
+      console.log('%c[PWA-EasyLogin]', 'color: #22c55e; font-weight: bold;', msg);
+    }
+  };
+
   // ===== State =====
   let setupComplete = false;
   let unlocked = false;
@@ -271,18 +282,24 @@
 
   function onQRScan(decodedText) {
     try {
+      log('QR Code gescannt:', decodedText);
       const payload = JSON.parse(decodedText);
+      log('QR Payload geparst:', payload);
       if (!payload?.peerId) throw new Error('Invalid QR');
       lastPayload = payload;
       updateScanStatus('QR gescannt');
       connectPeer(payload);
       setTimeout(() => {
         if (conn?.open) {
+          log('Verbindung offen, zeige Login-Auswahl');
           setMode('login-selection-mode');
           renderAvailableLogins();
+        } else {
+          log('Verbindung NICHT offen nach 1s');
         }
       }, 1000);
     } catch (err) {
+      log('QR Parse Error:', err);
       updateScanStatus('Ungültiger QR-Code');
     }
   }
@@ -299,18 +316,28 @@
     if (!window.Peer) return;
     if (peer) peer.destroy();
 
+    log('Verbinde zu Peer:', payload.peerId);
     peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
     peer.on('open', () => {
+      log('Peer geoeffnet');
       conn = peer.connect(payload.peerId, { reliable: true });
       conn.on('open', () => {
+        log('Verbindung offen, sende Hello');
         conn.send({ type: 'EasyLoginHello', client: 'PWA' });
       });
       conn.on('close', () => {
+        log('Verbindung geschlossen');
         updateScanStatus('Verbindung getrennt');
         setMode('camera-mode');
       });
+      conn.on('error', (err) => {
+        log('Verbindungsfehler:', err);
+      });
     });
-    peer.on('error', () => updateScanStatus('PeerJS Fehler'));
+    peer.on('error', (err) => {
+      log('PeerJS Fehler:', err);
+      updateScanStatus('PeerJS Fehler');
+    });
   }
 
   // ===== Login Management =====
@@ -444,8 +471,13 @@
   }
 
   function selectLoginForSending(id) {
+    log('Waehle Login zum Senden:', id);
     const login = logins.find(l => l.id === id);
-    if (!login) return;
+    if (!login) {
+      log('Fehler: Login nicht gefunden');
+      return;
+    }
+    log('Sende Login:', { name: login.name, username: login.username });
     sendLogin(login.username, login.password, login.twofa);
   }
 
@@ -460,19 +492,42 @@
 
   // ===== Send Login to Desktop =====
   async function sendLogin(username, password, twofa = '') {
-    if (!conn?.open || !lastPayload) return;
+    if (!conn?.open || !lastPayload) {
+      log('Fehler: Keine Verbindung oder lastPayload');
+      return;
+    }
+
+    log('Sende Login:', { username, hasPassword: !!password, host: lastPayload.host });
 
     try {
       const url = `https://${lastPayload.host}/api/logins`;
+      log('Login API URL:', url);
+      
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ login: { username, password } })
       });
 
-      const data = await response.json().catch(() => null);
+      log('Login Response Status:', response.status, 'OK:', response.ok);
+      
+      // 401 Unauthorized - erkenne dies und sende es nicht
+      if (response.status === 401) {
+        log('Login Failed: 401 Unauthorized - sende NICHT über PeerJS');
+        updateScanStatus('Login fehlgeschlagen');
+        setMode('camera-mode');
+        return;
+      }
+      
+      const data = await response.json().catch(() => {
+        log('JSON Parse Error bei Login Response');
+        return null;
+      });
+
+      log('Login Response Data:', data);
 
       if (data?.missing2fa) {
+        log('2FA erforderlich');
         if (twofa) {
           await verify2FA(twofa, data);
         } else {
@@ -481,6 +536,7 @@
         return;
       }
 
+      log('Sende EasyLoginResponse mit success:', response.ok);
       conn.send({
         type: 'EasyLoginResponse',
         success: response.ok,
@@ -491,6 +547,7 @@
 
       setMode('camera-mode');
     } catch (error) {
+      log('Fehler bei sendLogin:', error);
       conn.send({
         type: 'EasyLoginResponse',
         success: false,
@@ -510,35 +567,60 @@
   }
 
   async function verify2FA(code, loginData) {
-    if (!conn?.open || !lastPayload) return;
+    if (!conn?.open || !lastPayload) {
+      log('Fehler: Keine Verbindung bei 2FA');
+      return;
+    }
+
+    log('Verifiziere 2FA mit Code:', code);
 
     try {
+      const sessionToken = loginData.sessionToken || loginData.sessionId || loginData.token || '';
+      log('2FA Session Token:', sessionToken ? 'vorhanden' : 'FEHLT');
+      
       const url = `https://${lastPayload.host}/api/session/verify2fa/all/${code}`;
+      log('2FA Verify URL:', url);
+      
       const response = await fetch(url, {
+        method: 'POST',
         headers: {
-          'x-session-token': loginData.sessionToken || loginData.sessionId || ''
-        }
+          'Content-Type': 'application/json',
+          'x-session-token': sessionToken
+        },
+        body: JSON.stringify({ token: sessionToken })
       });
 
+      log('2FA Response Status:', response.status);
+      
+      // 401 bei 2FA - auch nicht weitersenden
+      if (response.status === 401) {
+        log('2FA Failed: 401 Unauthorized');
+        updateScanStatus('2FA Verifizierung fehlgeschlagen');
+        setMode('camera-mode');
+        return;
+      }
+      
       const verifyData = await response.json().catch(() => null);
+      log('2FA Verify Data:', verifyData);
 
-      conn.send({
-        type: 'EasyLoginResponse',
-        success: response.ok,
-        session: verifyData || loginData,
-        host: lastPayload.host,
-        ref: lastPayload.ref
-      });
-
-      setMode('camera-mode');
+      if (response.ok) {
+        conn.send({
+          type: 'EasyLoginResponse',
+          success: true,
+          session: verifyData || loginData,
+          host: lastPayload.host,
+          ref: lastPayload.ref
+        });
+        setMode('camera-mode');
+      } else {
+        log('2FA Verifizierung fehlgeschlagen');
+        updateScanStatus('2FA Verifizierung fehlgeschlagen');
+        setMode('camera-mode');
+      }
     } catch (error) {
-      conn.send({
-        type: 'EasyLoginResponse',
-        success: false,
-        error: error?.message,
-        host: lastPayload.host,
-        ref: lastPayload.ref
-      });
+      log('2FA Fehler:', error);
+      updateScanStatus('2FA Fehler aufgetreten');
+      setMode('camera-mode');
     }
   }
 
