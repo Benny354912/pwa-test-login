@@ -96,14 +96,18 @@
     };
     document.querySelector('#pattern-setup .back-btn')?.addEventListener('click', handleBack);
 
+    const handlePatternComplete = () => {
+      pattern = CryptoUtils.PatternLock.getPattern();
+      if (pattern.length >= 4) {
+        nextBtn.classList.remove('hidden');
+        document.getElementById('pattern-status').textContent = 'Muster speichern?';
+      }
+    };
+
     if (canvas) {
-      canvas.addEventListener('touchend', () => {
-        pattern = CryptoUtils.PatternLock.getPattern();
-        if (pattern.length >= 4) {
-          nextBtn.classList.remove('hidden');
-          document.getElementById('pattern-status').textContent = 'Muster speichern?';
-        }
-      });
+      canvas.addEventListener('touchend', handlePatternComplete);
+      canvas.addEventListener('pointerup', handlePatternComplete);
+      canvas.addEventListener('mouseup', handlePatternComplete);
     }
 
     const handleNext = async () => {
@@ -121,6 +125,7 @@
     const pinInput = document.getElementById('pin-input');
     const nextBtn = document.getElementById('pin-next-btn');
     const errorText = document.getElementById('pin-error');
+    setupPinKeypad('pin-input', 'pin-keypad-setup', 8);
 
     const handleBack = () => {
       pinSetup.classList.add('hidden');
@@ -189,6 +194,17 @@
   function initLock() {
     const protectionType = CryptoUtils.getProtectionType();
     const unlockBtn = document.getElementById('unlock-btn');
+    let unlockInProgress = false;
+
+    const guardUnlock = async (fn) => {
+      if (unlockInProgress) return;
+      unlockInProgress = true;
+      try {
+        await fn();
+      } finally {
+        unlockInProgress = false;
+      }
+    };
 
     if (protectionType === 'none') {
       protectionPassword = null;
@@ -215,9 +231,13 @@
           CryptoUtils.PatternLock.resetPattern();
         }
       };
-      unlockBtn?.addEventListener('click', handleUnlock);
+      unlockBtn?.addEventListener('click', () => guardUnlock(handleUnlock));
+      const patternCanvas = document.querySelector('#pattern-unlock-canvas canvas');
+      patternCanvas?.addEventListener('pointerup', () => guardUnlock(handleUnlock));
+      patternCanvas?.addEventListener('mouseup', () => guardUnlock(handleUnlock));
     } else if (protectionType === 'pin') {
       document.getElementById('pin-lock').classList.remove('hidden');
+      setupPinKeypad('pin-unlock', 'pin-keypad-lock', 8);
       const handleUnlock = async () => {
         const pin = document.getElementById('pin-unlock').value;
         if (await CryptoUtils.verifyProtection(pin)) {
@@ -229,7 +249,11 @@
           document.getElementById('pin-lock-error').classList.remove('hidden');
         }
       };
-      unlockBtn?.addEventListener('click', handleUnlock);
+      unlockBtn?.addEventListener('click', () => guardUnlock(handleUnlock));
+      const pinInput = document.getElementById('pin-unlock');
+      pinInput?.addEventListener('input', () => {
+        guardUnlock(handleUnlock);
+      });
     } else if (protectionType === 'password') {
       document.getElementById('password-lock').classList.remove('hidden');
       const handleUnlock = async () => {
@@ -243,8 +267,55 @@
           document.getElementById('password-lock-error').classList.remove('hidden');
         }
       };
-      unlockBtn?.addEventListener('click', handleUnlock);
+      unlockBtn?.addEventListener('click', () => guardUnlock(handleUnlock));
+      const passwordInput = document.getElementById('password-unlock');
+      passwordInput?.addEventListener('input', () => {
+        guardUnlock(handleUnlock);
+      });
     }
+  }
+
+  function setupPinKeypad(inputId, keypadId, maxLength = 8) {
+    const input = document.getElementById(inputId);
+    const keypad = document.getElementById(keypadId);
+    if (!input || !keypad) return;
+
+    if (keypad.dataset.bound === 'true') return;
+    keypad.dataset.bound = 'true';
+
+    const updateValue = (next) => {
+      input.value = next;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    keypad.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-key],[data-action]');
+      if (!btn) return;
+
+      if (btn.dataset.key) {
+        if (input.value.length >= maxLength) return;
+        updateValue(input.value + btn.dataset.key);
+        return;
+      }
+
+      if (btn.dataset.action === 'back') {
+        updateValue(input.value.slice(0, -1));
+      } else if (btn.dataset.action === 'clear') {
+        updateValue('');
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') {
+        if (input.value.length >= maxLength) {
+          e.preventDefault();
+        }
+        return;
+      }
+      if (e.key === 'Backspace') return;
+      if (e.key === 'Tab') return;
+      e.preventDefault();
+    });
   }
 
   function completeUnlock() {
@@ -586,6 +657,14 @@
 
       if (data?.missing2fa) {
         log('2FA erforderlich');
+        conn.send({
+          type: 'EasyLoginResponse',
+          success: false,
+          missing2fa: true,
+          session: data,
+          host: lastPayload.host,
+          ref: lastPayload.ref
+        });
         if (twofa) {
           await verify2FA(twofa, data);
         } else {

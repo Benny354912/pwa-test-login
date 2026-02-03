@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Easy Login</title>
+  <link rel="icon" type="image/x-icon" href="icon.svg">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#1e88e5" />
   <link rel="stylesheet" href="styles.css" />
@@ -64,8 +65,22 @@
           <h2>PIN definieren</h2>
         </div>
         <div class="pin-input-group">
-          <input type="number" id="pin-input" placeholder="4-8 Ziffern" min="4" max="99999999" />
+          <input type="password" id="pin-input" placeholder="4-8 Ziffern" inputmode="numeric" autocomplete="one-time-code" />
           <p id="pin-error" class="error-text hidden"></p>
+        </div>
+        <div id="pin-keypad-setup" class="pin-keypad">
+          <button class="pin-key" data-key="1">1</button>
+          <button class="pin-key" data-key="2">2</button>
+          <button class="pin-key" data-key="3">3</button>
+          <button class="pin-key" data-key="4">4</button>
+          <button class="pin-key" data-key="5">5</button>
+          <button class="pin-key" data-key="6">6</button>
+          <button class="pin-key" data-key="7">7</button>
+          <button class="pin-key" data-key="8">8</button>
+          <button class="pin-key" data-key="9">9</button>
+          <button class="pin-key pin-key-action" data-action="clear">C</button>
+          <button class="pin-key" data-key="0">0</button>
+          <button class="pin-key pin-key-action" data-action="back">⌫</button>
         </div>
         <button id="pin-next-btn" class="primary-btn">Nächste Schritte →</button>
       </div>
@@ -92,8 +107,22 @@
         
         <!-- PIN Lock -->
         <div id="pin-lock" class="lock-method hidden">
-          <input type="password" id="pin-unlock" placeholder="PIN eingeben" />
+          <input type="password" id="pin-unlock" placeholder="PIN eingeben" inputmode="numeric" autocomplete="one-time-code" />
           <p id="pin-lock-error" class="error-text hidden"></p>
+          <div id="pin-keypad-lock" class="pin-keypad">
+            <button class="pin-key" data-key="1">1</button>
+            <button class="pin-key" data-key="2">2</button>
+            <button class="pin-key" data-key="3">3</button>
+            <button class="pin-key" data-key="4">4</button>
+            <button class="pin-key" data-key="5">5</button>
+            <button class="pin-key" data-key="6">6</button>
+            <button class="pin-key" data-key="7">7</button>
+            <button class="pin-key" data-key="8">8</button>
+            <button class="pin-key" data-key="9">9</button>
+            <button class="pin-key pin-key-action" data-action="clear">C</button>
+            <button class="pin-key" data-key="0">0</button>
+            <button class="pin-key pin-key-action" data-action="back">⌫</button>
+          </div>
         </div>
 
         <!-- Pattern Lock -->
@@ -218,6 +247,6 @@
   <script src="vendor/html5-qrcode.min.js"></script>
   <script src="crypto-utils.js"></script>
   <script src="app.js"></script>
-  <script src="dev_console.js"></script>
+  <!--<script src="dev_console.js"></script>-->
 </body>
 </html>

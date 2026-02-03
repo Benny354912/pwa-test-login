@@ -205,6 +205,7 @@ const CryptoUtils = (() => {
     const PATTERN_POINTS = 9;
     const GRID_SIZE = 3;
     let selectedPoints = [];
+    let isDrawing = false;
 
     function createPatternCanvas(containerId) {
       const container = document.getElementById(containerId);
@@ -212,20 +213,26 @@ const CryptoUtils = (() => {
 
       container.innerHTML = '';
       const canvas = document.createElement('canvas');
-      canvas.width = 300;
-      canvas.height = 300;
+      const size = 300;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.width = `${size}px`;
+      canvas.style.height = `${size}px`;
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
       canvas.className = 'pattern-grid';
       container.appendChild(canvas);
 
       const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
       const pointRadius = 20;
-      const spacing = 100;
+      const spacing = size / GRID_SIZE;
+      const offset = spacing / 2;
 
       // Zeichne Grid
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
-          const x = 50 + j * spacing;
-          const y = 50 + i * spacing;
+          const x = offset + j * spacing;
+          const y = offset + i * spacing;
           ctx.fillStyle = '#e5e7eb';
           ctx.fillRect(x - 25, y - 25, 50, 50);
           ctx.fillStyle = '#d1d5db';
@@ -235,25 +242,36 @@ const CryptoUtils = (() => {
         }
       }
 
-      // Touch-Handler
-      canvas.addEventListener('touchstart', (e) => handlePatternInput(e, canvas, spacing));
-      canvas.addEventListener('touchmove', (e) => handlePatternInput(e, canvas, spacing));
-      canvas.addEventListener('touchend', (e) => endPattern(e));
+      // Pointer-Handler (Touch + Mouse)
+      canvas.addEventListener('pointerdown', (e) => {
+        isDrawing = true;
+        canvas.setPointerCapture(e.pointerId);
+        handlePatternInput(e, canvas, spacing, offset);
+      });
+      canvas.addEventListener('pointermove', (e) => {
+        if (!isDrawing) return;
+        handlePatternInput(e, canvas, spacing, offset);
+      });
+      const endHandler = (e) => {
+        isDrawing = false;
+        endPattern(e);
+      };
+      canvas.addEventListener('pointerup', endHandler);
+      canvas.addEventListener('pointerleave', endHandler);
 
       return canvas;
     }
 
-    function handlePatternInput(e, canvas, spacing) {
-      if (e.touches.length === 0) return;
-      
+    function handlePatternInput(e, canvas, spacing, offset) {
+      e.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const x = e.touches[0].clientX - rect.left;
-      const y = e.touches[0].clientY - rect.top;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
 
-      const point = getPointAtCoords(x, y, spacing);
+      const point = getPointAtCoords(x, y, spacing, offset);
       if (point !== null && !selectedPoints.includes(point)) {
         selectedPoints.push(point);
-        redrawPattern(canvas, spacing);
+        redrawPattern(canvas, spacing, offset);
       }
     }
 
@@ -261,11 +279,11 @@ const CryptoUtils = (() => {
       e.preventDefault();
     }
 
-    function getPointAtCoords(x, y, spacing) {
+    function getPointAtCoords(x, y, spacing, offset) {
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
-          const px = 50 + j * spacing;
-          const py = 50 + i * spacing;
+          const px = offset + j * spacing;
+          const py = offset + i * spacing;
           const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
           if (dist < 40) {
             return i * GRID_SIZE + j;
@@ -275,15 +293,15 @@ const CryptoUtils = (() => {
       return null;
     }
 
-    function redrawPattern(canvas, spacing) {
+    function redrawPattern(canvas, spacing, offset) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Zeichne Grid
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
-          const x = 50 + j * spacing;
-          const y = 50 + i * spacing;
+          const x = offset + j * spacing;
+          const y = offset + i * spacing;
           const idx = i * GRID_SIZE + j;
           const isSelected = selectedPoints.includes(idx);
 
@@ -302,8 +320,8 @@ const CryptoUtils = (() => {
       selectedPoints.forEach((point, idx) => {
         const i = Math.floor(point / GRID_SIZE);
         const j = point % GRID_SIZE;
-        const x = 50 + j * spacing;
-        const y = 50 + i * spacing;
+        const x = offset + j * spacing;
+        const y = offset + i * spacing;
         if (idx === 0) {
           ctx.beginPath();
           ctx.moveTo(x, y);
