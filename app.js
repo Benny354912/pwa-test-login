@@ -425,8 +425,7 @@
     
     // Wenn Nachricht verschlüsselt ist, entschlüssele sie
     if (data.encrypted && data.encryptedData && currentKeyPair?.privateKey) {
-      // Nutze sichere Entschlüsselung mit Hybrid-Support
-      const decrypted = await CryptoUtils.EncryptionUtils.decryptObjectSafe(
+      const decrypted = await CryptoUtils.EncryptionUtils.decryptObject(
         currentKeyPair.privateKey,
         data.encryptedData
       );
@@ -464,18 +463,16 @@
   async function sendEncryptedMessage(message) {
     if (!conn?.open) {
       log('Fehler: Keine offene Verbindung');
-      return false;
+      return;
     }
     
     if (!remotePublicKey) {
-      log('KRITISCHER FEHLER: Remote Public Key nicht verfügbar - kann nicht verschlüsseln');
-      updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
-      return false;
+      log('Fehler: Remote Public Key nicht verfügbar - Verschlüsselung unmöglich');
+      throw new Error('Verschlüsselung fehlgeschlagen: Kein Remote Public Key verfügbar');
     }
     
     try {
-      // Nutze sichere Verschlüsselung mit Hybrid-Fallback
-      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObjectSafe(
+      const encryptedData = await CryptoUtils.EncryptionUtils.encryptObject(
         remotePublicKey,
         message
       );
@@ -486,16 +483,13 @@
           encryptedData: encryptedData
         });
         log('Verschlüsselte Nachricht gesendet:', message?.type);
-        return true;
       } else {
-        log('KRITISCHER FEHLER: Verschlüsselung fehlgeschlagen');
-        updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
-        return false;
+        log('Fehler: Verschlüsselung ergab keine Daten');
+        throw new Error('Verschlüsselung fehlgeschlagen: Keine Daten zurückgegeben');
       }
     } catch (error) {
-      log('KRITISCHER FEHLER beim Senden verschlüsselter Nachricht:', error);
-      updateScanStatus('Verschlüsselung fehlgeschlagen - bitte versuchen Sie es erneut');
-      return false;
+      log('Fehler beim Senden verschlüsselter Nachricht:', error);
+      throw error;
     }
   }
 
@@ -705,14 +699,36 @@
         // Sende Login-Response mit missing2FA=true an Erweiterung, wenn kein 2FA-Schlüssel vorhanden
         if (!twofa) {
           log('Kein 2FA Schlüssel vorhanden - sende Login mit missing2FA=true an Erweiterung');
-          await sendEncryptedMessage({
-            type: 'EasyLoginResponse',
-            success: false,
-            missing2fa: true,
-            session: data,
-            host: lastPayload.host,
-            ref: lastPayload.ref
-          });
+          try {
+            await sendEncryptedMessage({
+              type: 'EasyLoginResponse',
+              success: false,
+              missing2fa: true,
+              session: data,
+              host: lastPayload.host,
+              ref: lastPayload.ref
+            });
+          } catch (encryptError) {
+            log('Verschlüsselung für 2FA-Response fehlgeschlagen:', encryptError);
+            const allowUnencrypted = confirm(
+              'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Nachricht unverschlüsselt senden? Warnung: Dies ist unsicher!'
+            );
+            if (allowUnencrypted && conn?.open) {
+              conn.send({
+                type: 'EasyLoginResponse',
+                success: false,
+                missing2fa: true,
+                session: data,
+                host: lastPayload.host,
+                ref: lastPayload.ref
+              });
+              log('2FA-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
+            } else {
+              log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
+              updateScanStatus('Fehler: Verschlüsselung erforderlich');
+              return;
+            }
+          }
         }
         
         // Manuelle 2FA-Eingabe ermöglichen
@@ -731,35 +747,84 @@
       }
 
       log('Sende EasyLoginResponse mit success:', response.ok);
-      await sendEncryptedMessage({
-        type: 'EasyLoginResponse',
-        success: response.ok,
-        session: data,
-        host: lastPayload.host,
-        ref: lastPayload.ref
-      });
-      
-      if (response.ok) {
-        log('Login erfolgreich - Verbindung wird geschlossen');
-        updateScanStatus('Login erfolgreich');
-        setMode('camera-mode');
+      try {
+        await sendEncryptedMessage({
+          type: 'EasyLoginResponse',
+          success: response.ok,
+          session: data,
+          host: lastPayload.host,
+          ref: lastPayload.ref
+        });
         
-        // Warte kurz, dann schließe Verbindung sauber
-        setTimeout(() => {
-          cleanupConnection();
-        }, 1000);
-      } else {
+        if (response.ok) {
+          log('Login erfolgreich - Verschlüsselte Nachricht gesendet');
+          updateScanStatus('Login erfolgreich');
+          setMode('camera-mode');
+          
+          // Warte kurz, dann schließe Verbindung sauber
+          setTimeout(() => {
+            cleanupConnection();
+          }, 1000);
+        } else {
+          setMode('camera-mode');
+        }
+      } catch (encryptError) {
+        log('Verschlüsselung für Login-Response fehlgeschlagen:', encryptError);
+        const allowUnencrypted = confirm(
+          'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Anmeldedaten unverschlüsselt senden? Warnung: Dies ist unsicher!'
+        );
+        
+        if (allowUnencrypted && conn?.open) {
+          conn.send({
+            type: 'EasyLoginResponse',
+            success: response.ok,
+            session: data,
+            host: lastPayload.host,
+            ref: lastPayload.ref
+          });
+          log('Login-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
+          
+          if (response.ok) {
+            updateScanStatus('Login erfolgreich (unverschlüsselt)');
+            setTimeout(() => {
+              cleanupConnection();
+            }, 1000);
+          }
+        } else {
+          log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
+          updateScanStatus('Fehler: Verschlüsselung erforderlich');
+        }
         setMode('camera-mode');
       }
     } catch (error) {
       log('Fehler bei sendLogin:', error);
-      await sendEncryptedMessage({
-        type: 'EasyLoginResponse',
-        success: false,
-        error: error?.message,
-        host: lastPayload.host,
-        ref: lastPayload.ref
-      });
+      try {
+        await sendEncryptedMessage({
+          type: 'EasyLoginResponse',
+          success: false,
+          error: error?.message,
+          host: lastPayload.host,
+          ref: lastPayload.ref
+        });
+      } catch (encryptError) {
+        log('Verschlüsselung für Fehler-Response fehlgeschlagen:', encryptError);
+        const allowUnencrypted = confirm(
+          'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie den Fehler unverschlüsselt senden? Warnung: Dies ist unsicher!'
+        );
+        
+        if (allowUnencrypted && conn?.open) {
+          conn.send({
+            type: 'EasyLoginResponse',
+            success: false,
+            error: error?.message,
+            host: lastPayload.host,
+            ref: lastPayload.ref
+          });
+          log('Fehler-Response unverschlüsselt gesendet (mit Benutzerbestätigung)');
+        } else {
+          log('Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
+        }
+      }
     }
   }
 
@@ -825,21 +890,49 @@
       log('2FA Verify Data:', verifyData);
 
       if (response.ok) {
-        await sendEncryptedMessage({
-          type: 'EasyLoginResponse',
-          success: true,
-          session: verifyData || loginData,
-          host: lastPayload.host,
-          ref: lastPayload.ref
-        });
-        log('2FA erfolgreich - Verbindung wird geschlossen');
-        updateScanStatus('Login erfolgreich');
-        setMode('camera-mode');
-        
-        // Warte kurz, dann schließe Verbindung sauber
-        setTimeout(() => {
-          cleanupConnection();
-        }, 1000);
+        try {
+          await sendEncryptedMessage({
+            type: 'EasyLoginResponse',
+            success: true,
+            session: verifyData || loginData,
+            host: lastPayload.host,
+            ref: lastPayload.ref
+          });
+          log('2FA erfolgreich - Verschlüsselte Nachricht gesendet');
+          updateScanStatus('Login erfolgreich');
+          setMode('camera-mode');
+          
+          // Warte kurz, dann schließe Verbindung sauber
+          setTimeout(() => {
+            cleanupConnection();
+          }, 1000);
+        } catch (encryptError) {
+          log('2FA Verschlüsselung fehlgeschlagen:', encryptError);
+          const allowUnencrypted = confirm(
+            'Die Verschlüsslung hat fehlgeschlagen. Möchten Sie die Anmeldedaten unverschlüsselt senden? Warnung: Dies ist unsicher!'
+          );
+          
+          if (allowUnencrypted && conn?.open) {
+            conn.send({
+              type: 'EasyLoginResponse',
+              success: true,
+              session: verifyData || loginData,
+              host: lastPayload.host,
+              ref: lastPayload.ref
+            });
+            log('2FA erfolgreich - Unverschlüsselte Nachricht gesendet (mit Benutzerbestätigung)');
+            updateScanStatus('Login erfolgreich (unverschlüsselt)');
+            setMode('camera-mode');
+            
+            setTimeout(() => {
+              cleanupConnection();
+            }, 1000);
+          } else {
+            log('2FA abgebrochen - Benutzer hat unverschlüsseltem Senden nicht zugestimmt');
+            updateScanStatus('Login abgebrochen - Verschlüsselung erforderlich');
+            setMode('camera-mode');
+          }
+        }
       } else {
         log('2FA Verifizierung fehlgeschlagen');
         updateScanStatus('2FA Verifizierung fehlgeschlagen');

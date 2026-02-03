@@ -275,19 +275,8 @@ const CryptoUtils = (() => {
      */
     async function encryptWithPublicKey(publicKey, text) {
       try {
-        // Prüfe ob Public Key gültig ist
-        if (!publicKey || typeof publicKey !== 'object') {
-          throw new Error('Ungültiger Public Key: Key ist nicht vom erwarteten Typ');
-        }
-
         const encoder = new TextEncoder();
         const data = encoder.encode(text);
-        
-        // RSA-OAEP mit 2048-bit Key kann maximal ~214 Bytes verschlüsseln
-        if (data.byteLength > 190) {
-          console.warn(`Warnung: Daten zu groß für RSA-OAEP (${data.byteLength} bytes). Mit Hybrid-Verschlüsselung würde dieses Problem gelöst.`);
-        }
-
         const encryptedBuffer = await crypto.subtle.encrypt(
           'RSA-OAEP',
           publicKey,
@@ -296,11 +285,7 @@ const CryptoUtils = (() => {
         // Konvertiere zu Base64 für Transport
         return btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
       } catch (error) {
-        console.error('Fehler beim Verschlüsseln:', error.message);
-        console.error('Error Details:', error);
-        if (error.message && error.message.includes('data')) {
-          console.error('Mögliche Ursache: Die zu verschlüsselnden Daten sind zu groß für RSA-OAEP');
-        }
+        console.error('Fehler beim Verschlüsseln:', error);
         return null;
       }
     }
@@ -337,148 +322,18 @@ const CryptoUtils = (() => {
     }
 
     /**
-     * Verschlüsselt ein Objekt mit Hybrid-Verschlüsselung (AES-GCM + RSA-OAEP)
-     * Dies umgeht die Größenlimitierung von RSA
+     * Entschlüsselt ein Objekt mit einem Private Key
      */
-    async function encryptObjectHybrid(publicKey, obj) {
+    async function decryptObject(privateKey, encryptedBase64) {
+      const decrypted = await decryptWithPrivateKey(privateKey, encryptedBase64);
+      if (!decrypted) return null;
       try {
-        const jsonString = JSON.stringify(obj);
-        
-        // Generiere einen zufälligen AES-Schlüssel
-        const aesKey = await crypto.subtle.generateKey(
-          { name: 'AES-GCM', length: 256 },
-          true,
-          ['encrypt', 'decrypt']
-        );
-        
-        // Verschlüssele die Daten mit AES-GCM
-        const encoder = new TextEncoder();
-        const data = encoder.encode(jsonString);
-        const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV für GCM
-        
-        const encryptedData = await crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv: iv },
-          aesKey,
-          data
-        );
-        
-        // Exportiere den AES-Schlüssel
-        const rawKey = await crypto.subtle.exportKey('raw', aesKey);
-        
-        // Verschlüssele den AES-Schlüssel mit RSA-OAEP
-        const encryptedKey = await encryptWithPublicKey(
-          publicKey,
-          btoa(String.fromCharCode(...new Uint8Array(rawKey)))
-        );
-        
-        if (!encryptedKey) {
-          throw new Error('Konnte AES-Schlüssel nicht mit Public Key verschlüsseln');
-        }
-        
-        // Gebe das Hybrid-Format zurück
-        return JSON.stringify({
-          hybrid: true,
-          encryptedKey: encryptedKey,
-          encryptedData: btoa(String.fromCharCode(...new Uint8Array(encryptedData))),
-          iv: btoa(String.fromCharCode(...iv))
-        });
+        return JSON.parse(decrypted);
       } catch (error) {
-        console.error('Fehler bei Hybrid-Verschlüsselung:', error.message);
+        console.error('Fehler beim Parsen des entschlüsselten Objekts:', error);
         return null;
       }
     }
-
-    /**
-     * Entschlüsselt ein Objekt mit Hybrid-Verschlüsselung
-     */
-    async function decryptObjectHybrid(privateKey, hybridString) {
-      try {
-        const hybrid = JSON.parse(hybridString);
-        if (!hybrid.hybrid) {
-          throw new Error('Keine Hybrid-Verschlüsselung erkannt');
-        }
-        
-        // Entschlüssele den AES-Schlüssel
-        const decryptedKeyBase64 = await decryptWithPrivateKey(
-          privateKey,
-          hybrid.encryptedKey
-        );
-        
-        if (!decryptedKeyBase64) {
-          throw new Error('Konnte AES-Schlüssel nicht entschlüsseln');
-        }
-        
-        // Importiere den AES-Schlüssel
-        const keyBuffer = Uint8Array.from(atob(decryptedKeyBase64), c => c.charCodeAt(0));
-        const aesKey = await crypto.subtle.importKey(
-          'raw',
-          keyBuffer,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['decrypt']
-        );
-        
-        // Entschlüssele die Daten
-        const encryptedData = Uint8Array.from(atob(hybrid.encryptedData), c => c.charCodeAt(0));
-        const iv = Uint8Array.from(atob(hybrid.iv), c => c.charCodeAt(0));
-        
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: iv },
-          aesKey,
-          encryptedData
-        );
-        
-        const decoder = new TextDecoder();
-        const jsonString = decoder.decode(decryptedBuffer);
-        return JSON.parse(jsonString);
-      } catch (error) {
-        console.error('Fehler bei Hybrid-Entschlüsselung:', error.message);
-        return null;
-      }
-    }
-
-    /**
-     * Verschlüsselt ein Objekt mit automatischem Fallback zu Hybrid-Verschlüsselung
-     */
-    async function encryptObjectSafe(publicKey, obj) {
-      // Versuche zuerst direkte RSA-OAEP Verschlüsselung
-      const result = await encryptObject(publicKey, obj);
-      
-      if (result) {
-        // Erfolgreich mit direkter Verschlüsselung
-        return result;
-      }
-      
-      // Fallback zu Hybrid-Verschlüsselung
-      console.log('Direkte RSA-Verschlüsselung fehlgeschlagen, versuche Hybrid-Verschlüsselung...');
-      const hybridResult = await encryptObjectHybrid(publicKey, obj);
-      
-      if (hybridResult) {
-        console.log('Hybrid-Verschlüsselung erfolgreich');
-        return hybridResult;
-      }
-      
-      return null;
-    }
-
-    /**
-     * Entschlüsselt ein Objekt mit automatischer Erkennung des Formats
-     */
-    async function decryptObjectSafe(privateKey, encryptedString) {
-      try {
-        const obj = JSON.parse(encryptedString);
-        if (obj.hybrid) {
-          // Hybrid-Format erkannt
-          return await decryptObjectHybrid(privateKey, encryptedString);
-        }
-      } catch (e) {
-        // Keine JSON Hybrid-Format, versuche direkte Entschlüsselung
-      }
-      
-      // Versuche direkte Entschlüsselung (altes Format)
-      return await decryptObject(privateKey, encryptedString);
-    }
-
 
     return {
       generateKeyPair,
@@ -487,11 +342,7 @@ const CryptoUtils = (() => {
       encryptWithPublicKey,
       decryptWithPrivateKey,
       encryptObject,
-      decryptObject,
-      encryptObjectHybrid,
-      decryptObjectHybrid,
-      encryptObjectSafe,
-      decryptObjectSafe
+      decryptObject
     };
   })();
 
