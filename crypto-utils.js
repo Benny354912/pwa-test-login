@@ -271,19 +271,48 @@ const CryptoUtils = (() => {
     }
 
     /**
-     * Verschlüsselt einen Text mit einem Public Key
+     * Verschlüsselt einen Text mit einem Public Key (Hybrid: AES + RSA)
+     * Verwendet AES-GCM für die Daten und RSA-OAEP für den AES-Schlüssel
      */
     async function encryptWithPublicKey(publicKey, text) {
       try {
+        // 1. Generiere einen zufälligen AES-Schlüssel
+        const aesKey = await crypto.subtle.generateKey(
+          { name: 'AES-GCM', length: 256 },
+          true,
+          ['encrypt', 'decrypt']
+        );
+        
+        // 2. Generiere einen zufälligen IV für AES
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        
+        // 3. Verschlüssele die Daten mit AES-GCM
         const encoder = new TextEncoder();
         const data = encoder.encode(text);
-        const encryptedBuffer = await crypto.subtle.encrypt(
-          'RSA-OAEP',
-          publicKey,
+        const encryptedData = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: iv },
+          aesKey,
           data
         );
-        // Konvertiere zu Base64 für Transport
-        return btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+        
+        // 4. Exportiere den AES-Schlüssel als Raw-Format
+        const aesKeyRaw = await crypto.subtle.exportKey('raw', aesKey);
+        
+        // 5. Verschlüssele den AES-Schlüssel mit RSA
+        const encryptedAesKey = await crypto.subtle.encrypt(
+          'RSA-OAEP',
+          publicKey,
+          aesKeyRaw
+        );
+        
+        // 6. Kombiniere alles: verschlüsselter AES-Schlüssel + IV + verschlüsselte Daten
+        const result = {
+          encryptedKey: btoa(String.fromCharCode(...new Uint8Array(encryptedAesKey))),
+          iv: btoa(String.fromCharCode(...iv)),
+          data: btoa(String.fromCharCode(...new Uint8Array(encryptedData)))
+        };
+        
+        return JSON.stringify(result);
       } catch (error) {
         console.error('Fehler beim Verschlüsseln:', error);
         return null;
@@ -291,20 +320,73 @@ const CryptoUtils = (() => {
     }
 
     /**
-     * Entschlüsselt einen Text mit einem Private Key
+     * Entschlüsselt einen Text mit einem Private Key (Hybrid: AES + RSA)
+     * Erwartet ein JSON-Objekt mit encryptedKey, iv und data
      */
     async function decryptWithPrivateKey(privateKey, encryptedBase64) {
       try {
-        // Konvertiere von Base64
-        const encryptedData = Uint8Array.from(
-          atob(encryptedBase64),
+        // Parse das verschlüsselte Objekt
+        let encryptedObj;
+        try {
+          encryptedObj = JSON.parse(encryptedBase64);
+        } catch {
+          // Fallback für altes Format (direkt RSA-verschlüsselt)
+          try {
+            const encryptedData = Uint8Array.from(
+              atob(encryptedBase64),
+              c => c.charCodeAt(0)
+            );
+            const decryptedBuffer = await crypto.subtle.decrypt(
+              'RSA-OAEP',
+              privateKey,
+              encryptedData
+            );
+            const decoder = new TextDecoder();
+            return decoder.decode(decryptedBuffer);
+          } catch (legacyError) {
+            console.error('Fehler beim Entschlüsseln (Legacy-Format):', legacyError);
+            return null;
+          }
+        }
+        
+        // Neues Hybrid-Format
+        // 1. Konvertiere die Base64-Strings zurück zu Uint8Arrays
+        const encryptedKey = Uint8Array.from(
+          atob(encryptedObj.encryptedKey),
           c => c.charCodeAt(0)
         );
-        const decryptedBuffer = await crypto.subtle.decrypt(
+        const iv = Uint8Array.from(
+          atob(encryptedObj.iv),
+          c => c.charCodeAt(0)
+        );
+        const encryptedData = Uint8Array.from(
+          atob(encryptedObj.data),
+          c => c.charCodeAt(0)
+        );
+        
+        // 2. Entschlüssele den AES-Schlüssel mit RSA
+        const aesKeyRaw = await crypto.subtle.decrypt(
           'RSA-OAEP',
           privateKey,
+          encryptedKey
+        );
+        
+        // 3. Importiere den AES-Schlüssel
+        const aesKey = await crypto.subtle.importKey(
+          'raw',
+          aesKeyRaw,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['decrypt']
+        );
+        
+        // 4. Entschlüssele die Daten mit AES-GCM
+        const decryptedBuffer = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: iv },
+          aesKey,
           encryptedData
         );
+        
         const decoder = new TextDecoder();
         return decoder.decode(decryptedBuffer);
       } catch (error) {
