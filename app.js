@@ -571,6 +571,21 @@
 
       if (data?.missing2fa) {
         log('2FA erforderlich, twofa Schlüssel vorhanden:', !!twofa);
+        
+        // Sende Login-Response mit missing2FA=true an Erweiterung, wenn kein 2FA-Schlüssel vorhanden
+        if (!twofa) {
+          log('Kein 2FA Schlüssel vorhanden - sende Login mit missing2FA=true an Erweiterung');
+          conn.send({
+            type: 'EasyLoginResponse',
+            success: false,
+            missing2fa: true,
+            session: data,
+            host: lastPayload.host,
+            ref: lastPayload.ref
+          });
+        }
+        
+        // Manuelle 2FA-Eingabe ermöglichen (unabhängig ob Schlüssel vorhanden oder nicht)
         if (twofa) {
           const totpCode = await TOTPGenerator.generate(twofa);
           log('Generierter TOTP Code:', totpCode ? totpCode : 'Fehler');
