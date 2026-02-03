@@ -187,7 +187,7 @@
     if (protectionType === 'pattern') {
       document.getElementById('pattern-lock').classList.remove('hidden');
       CryptoUtils.PatternLock.createPatternCanvas('pattern-unlock-canvas');
-      
+
       const handleUnlock = async () => {
         const pattern = CryptoUtils.PatternLock.getPattern();
         if (await CryptoUtils.verifyProtection(pattern)) {
@@ -304,7 +304,7 @@
     }
   }
 
-  function onQRError() {}
+  function onQRError() { }
 
   function updateScanStatus(text) {
     const statusEl = document.getElementById('scan-status-text');
@@ -502,7 +502,7 @@
     try {
       const url = `https://${lastPayload.host}/api/logins`;
       log('Login API URL:', url);
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -510,7 +510,7 @@
       });
 
       log('Login Response Status:', response.status, 'OK:', response.ok);
-      
+
       // 401 Unauthorized - erkenne dies und sende es nicht
       if (response.status === 401) {
         log('Login Failed: 401 Unauthorized - sende NICHT über PeerJS');
@@ -518,7 +518,7 @@
         setMode('camera-mode');
         return;
       }
-      
+
       const data = await response.json().catch(() => {
         log('JSON Parse Error bei Login Response');
         return null;
@@ -573,34 +573,32 @@
     }
 
     log('Verifiziere 2FA mit Code:', code);
-    log('LoginData Komplett:', loginData);
 
     try {
-      // Versuche alle möglichen Token-Felder zu finden
-      const sessionToken = loginData.sessionToken 
-        || loginData.sessionId 
-        || loginData.token 
-        || loginData.session?.sessionToken 
-        || loginData.session?.token
-        || loginData.session?.sessionId
-        || '';
-      
-      log('2FA Session Token gefunden:', sessionToken ? sessionToken.substring(0, 20) + '...' : 'FEHLT');
-      log('LoginData Keys:', Object.keys(loginData));
-      
+      // sessionid aus der Login Response auslesen
+      const sessionToken = loginData.sessionid || '';
+      log('2FA Session Token (sessionid):', sessionToken ? sessionToken.substring(0, 20) + '...' : 'FEHLT');
+
+      if (!sessionToken) {
+        log('Fehler: Keine sessionid in loginData gefunden');
+        updateScanStatus('2FA Fehler: Keine Session');
+        setMode('camera-mode');
+        return;
+      }
+
       const url = `https://${lastPayload.host}/api/session/verify2fa/all/${code}`;
       log('2FA Verify URL:', url);
-      
+      log('2FA Request Header x-session-token:', sessionToken.substring(0, 20) + '...');
+
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           'x-session-token': sessionToken
         }
       });
 
       log('2FA Response Status:', response.status);
-      
+
       // 401 bei 2FA - auch nicht weitersenden
       if (response.status === 401) {
         log('2FA Failed: 401 Unauthorized');
@@ -608,7 +606,7 @@
         setMode('camera-mode');
         return;
       }
-      
+
       const verifyData = await response.json().catch(() => null);
       log('2FA Verify Data:', verifyData);
 
@@ -692,7 +690,7 @@
 
   function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js').catch(() => { });
     }
   }
 })();
