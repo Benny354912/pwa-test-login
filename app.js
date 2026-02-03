@@ -1,315 +1,607 @@
-/* Easy Login PWA */
+/* Easy Login PWA - Moderne Version mit Setup, Lock Screen & 2FA */
 (() => {
-  const scanView = document.getElementById('scan-view');
-  const managerView = document.getElementById('manager-view');
-  const toggleViewBtn = document.getElementById('toggle-view');
-  const backToScanBtn = document.getElementById('back-to-scan');
-  const scanTapArea = document.getElementById('scan-tap-area');
-  const scanStatus = document.getElementById('scan-status');
-  const connStatus = document.getElementById('conn-status');
-  const connInstance = document.getElementById('conn-instance');
-  const loginList = document.getElementById('login-list');
-  const loginForm = document.getElementById('login-form');
-  const resetFormBtn = document.getElementById('reset-form');
-  const manualForm = document.getElementById('manual-form');
-
+  // ===== State =====
+  let setupComplete = false;
+  let unlocked = false;
   let qrScanner = null;
   let peer = null;
   let conn = null;
   let lastPayload = null;
-  let logins = loadLogins();
+  let logins = [];
+  let currentLoginId = null;
 
-  registerServiceWorker();
-  renderLogins();
-  startScanner();
+  const LOGINS_KEY = 'easylogin_logins';
+  const SETUP_KEY = 'easylogin_setup_complete';
 
-  toggleViewBtn?.addEventListener('click', () => setView('manager'));
-  backToScanBtn?.addEventListener('click', () => setView('scan'));
-  scanTapArea?.addEventListener('click', () => setView('manager'));
+  // ===== Initialization =====
+  document.addEventListener('DOMContentLoaded', async () => {
+    registerServiceWorker();
+    loadLogins();
 
-  loginForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const id = document.getElementById('login-id').value || generateId();
-    const name = document.getElementById('login-name').value.trim();
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value;
-
-    if (!name || !username || !password) return;
-
-    const existingIndex = logins.findIndex((item) => item.id === id);
-    const entry = { id, name, username, password };
-    if (existingIndex >= 0) {
-      logins[existingIndex] = entry;
+    setupComplete = localStorage.getItem(SETUP_KEY) === 'true';
+    if (!setupComplete) {
+      showScreen('setup-screen');
+      initSetup();
     } else {
-      logins.push(entry);
+      showScreen('lock-screen');
+      initLock();
     }
-
-    saveLogins();
-    renderLogins();
-    loginForm.reset();
   });
 
-  resetFormBtn?.addEventListener('click', () => {
-    loginForm.reset();
-    document.getElementById('login-id').value = '';
-  });
+  // ===== Screen Management =====
+  function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+    const screen = document.getElementById(screenId);
+    if (screen) screen.classList.remove('hidden');
+  }
 
-  manualForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const username = document.getElementById('manual-username').value.trim();
-    const password = document.getElementById('manual-password').value;
-    if (!username || !password) return;
-    await performLogin(username, password);
-  });
+  function setMode(modeId) {
+    document.querySelectorAll('.mode').forEach(m => m.classList.remove('active'));
+    const mode = document.getElementById(modeId);
+    if (mode) mode.classList.add('active');
+  }
 
-  function setView(view) {
-    if (view === 'manager') {
-      scanView.classList.remove('active');
-      managerView.classList.add('active');
-      toggleViewBtn.textContent = 'Zur Kamera';
-      stopScanner();
-    } else {
-      managerView.classList.remove('active');
-      scanView.classList.add('active');
-      toggleViewBtn.textContent = 'Passwort‑Manager';
-      startScanner();
+  // ===== Setup =====
+  function initSetup() {
+    document.querySelectorAll('.setup-option').forEach(btn => {
+      btn.addEventListener('click', () => startProtectionSetup(btn.dataset.protection));
+    });
+    document.getElementById('setup-import-btn')?.addEventListener('click', importLogins);
+  }
+
+  function startProtectionSetup(type) {
+    document.querySelectorAll('.protection-setup').forEach(s => s.classList.add('hidden'));
+
+    if (type === 'none') {
+      completeSetup();
+    } else if (type === 'pattern') {
+      showPatternSetup();
+    } else if (type === 'pin') {
+      showPinSetup();
+    } else if (type === 'password') {
+      showPasswordSetup();
     }
   }
 
-  function startScanner() {
+  function showPatternSetup() {
+    const patternSetup = document.getElementById('pattern-setup');
+    patternSetup.classList.remove('hidden');
+    const canvas = CryptoUtils.PatternLock.createPatternCanvas('pattern-canvas');
+    const nextBtn = document.getElementById('pattern-next-btn');
+    let pattern = '';
+
+    const handleBack = () => {
+      CryptoUtils.PatternLock.resetPattern();
+      patternSetup.classList.add('hidden');
+      document.querySelector('#pattern-setup .back-btn').removeEventListener('click', handleBack);
+    };
+    document.querySelector('#pattern-setup .back-btn')?.addEventListener('click', handleBack);
+
+    if (canvas) {
+      canvas.addEventListener('touchend', () => {
+        pattern = CryptoUtils.PatternLock.getPattern();
+        if (pattern.length >= 4) {
+          nextBtn.classList.remove('hidden');
+          document.getElementById('pattern-status').textContent = 'Muster speichern?';
+        }
+      });
+    }
+
+    const handleNext = async () => {
+      await CryptoUtils.setProtection('pattern', pattern);
+      completeSetup();
+      nextBtn.removeEventListener('click', handleNext);
+    };
+    nextBtn?.addEventListener('click', handleNext);
+  }
+
+  function showPinSetup() {
+    const pinSetup = document.getElementById('pin-setup');
+    pinSetup.classList.remove('hidden');
+    const pinInput = document.getElementById('pin-input');
+    const nextBtn = document.getElementById('pin-next-btn');
+    const errorText = document.getElementById('pin-error');
+
+    const handleBack = () => {
+      pinSetup.classList.add('hidden');
+      document.querySelector('#pin-setup .back-btn').removeEventListener('click', handleBack);
+    };
+    document.querySelector('#pin-setup .back-btn')?.addEventListener('click', handleBack);
+
+    const handleNext = async () => {
+      const pin = pinInput.value;
+      if (pin.length < 4 || pin.length > 8) {
+        errorText.textContent = 'PIN muss 4-8 Ziffern lang sein';
+        errorText.classList.remove('hidden');
+        return;
+      }
+      await CryptoUtils.setProtection('pin', pin);
+      completeSetup();
+      nextBtn.removeEventListener('click', handleNext);
+    };
+    nextBtn?.addEventListener('click', handleNext);
+  }
+
+  function showPasswordSetup() {
+    const passwordSetup = document.getElementById('password-setup');
+    passwordSetup.classList.remove('hidden');
+    const passwordInput = document.getElementById('password-input');
+    const confirmInput = document.getElementById('password-confirm');
+    const nextBtn = document.getElementById('password-next-btn');
+    const errorText = document.getElementById('password-error');
+
+    const handleBack = () => {
+      passwordSetup.classList.add('hidden');
+      document.querySelector('#password-setup .back-btn').removeEventListener('click', handleBack);
+    };
+    document.querySelector('#password-setup .back-btn')?.addEventListener('click', handleBack);
+
+    const handleNext = async () => {
+      if (passwordInput.value !== confirmInput.value) {
+        errorText.textContent = 'Passwörter stimmen nicht überein';
+        errorText.classList.remove('hidden');
+        return;
+      }
+      if (passwordInput.value.length < 6) {
+        errorText.textContent = 'Passwort muss mindestens 6 Zeichen lang sein';
+        errorText.classList.remove('hidden');
+        return;
+      }
+      await CryptoUtils.setProtection('password', passwordInput.value);
+      completeSetup();
+      nextBtn.removeEventListener('click', handleNext);
+    };
+    nextBtn?.addEventListener('click', handleNext);
+  }
+
+  async function completeSetup() {
+    localStorage.setItem(SETUP_KEY, 'true');
+    setupComplete = true;
+    showScreen('lock-screen');
+    initLock();
+  }
+
+  // ===== Lock Screen =====
+  function initLock() {
+    const protectionType = CryptoUtils.getProtectionType();
+    const unlockBtn = document.getElementById('unlock-btn');
+
+    if (protectionType === 'none') {
+      completeUnlock();
+      return;
+    }
+
+    document.querySelectorAll('.lock-method').forEach(m => m.classList.add('hidden'));
+
+    if (protectionType === 'pattern') {
+      document.getElementById('pattern-lock').classList.remove('hidden');
+      CryptoUtils.PatternLock.createPatternCanvas('pattern-unlock-canvas');
+      
+      const handleUnlock = async () => {
+        const pattern = CryptoUtils.PatternLock.getPattern();
+        if (await CryptoUtils.verifyProtection(pattern)) {
+          completeUnlock();
+        } else {
+          document.getElementById('pattern-lock-error').textContent = 'Muster falsch';
+          document.getElementById('pattern-lock-error').classList.remove('hidden');
+          CryptoUtils.PatternLock.resetPattern();
+        }
+      };
+      unlockBtn?.addEventListener('click', handleUnlock);
+    } else if (protectionType === 'pin') {
+      document.getElementById('pin-lock').classList.remove('hidden');
+      const handleUnlock = async () => {
+        const pin = document.getElementById('pin-unlock').value;
+        if (await CryptoUtils.verifyProtection(pin)) {
+          completeUnlock();
+        } else {
+          document.getElementById('pin-lock-error').textContent = 'PIN falsch';
+          document.getElementById('pin-lock-error').classList.remove('hidden');
+        }
+      };
+      unlockBtn?.addEventListener('click', handleUnlock);
+    } else if (protectionType === 'password') {
+      document.getElementById('password-lock').classList.remove('hidden');
+      const handleUnlock = async () => {
+        const password = document.getElementById('password-unlock').value;
+        if (await CryptoUtils.verifyProtection(password)) {
+          completeUnlock();
+        } else {
+          document.getElementById('password-lock-error').textContent = 'Passwort falsch';
+          document.getElementById('password-lock-error').classList.remove('hidden');
+        }
+      };
+      unlockBtn?.addEventListener('click', handleUnlock);
+    }
+  }
+
+  function completeUnlock() {
+    unlocked = true;
+    showScreen('main-screen');
+    initMain();
+  }
+
+  // ===== Main Screen =====
+  function initMain() {
+    setMode('camera-mode');
+    startQRScanner();
+    renderLoginsList();
+
+    document.getElementById('edit-logins-btn')?.addEventListener('click', () => setMode('editor-mode'));
+    document.getElementById('back-to-camera-btn')?.addEventListener('click', () => {
+      setMode('camera-mode');
+      document.getElementById('login-form-container').classList.add('hidden');
+    });
+    document.getElementById('add-login-btn')?.addEventListener('click', showAddLoginForm);
+    document.getElementById('cancel-form-btn')?.addEventListener('click', () => {
+      document.getElementById('login-form-container').classList.add('hidden');
+    });
+    document.getElementById('login-form')?.addEventListener('submit', handleLoginFormSubmit);
+    document.getElementById('cancel-selection-btn')?.addEventListener('click', () => setMode('camera-mode'));
+    document.getElementById('manual-login-form')?.addEventListener('submit', handleManualLogin);
+    document.getElementById('twofa-submit-btn')?.addEventListener('click', handle2FASubmit);
+    document.getElementById('twofa-cancel-btn')?.addEventListener('click', () => {
+      document.getElementById('twofa-dialog').classList.add('hidden');
+    });
+    document.getElementById('export-logins-btn')?.addEventListener('click', exportLogins);
+    document.getElementById('settings-btn')?.addEventListener('click', () => {
+      alert('Einstellungen in Bearbeitung');
+    });
+  }
+
+  // ===== QR Scanner =====
+  function startQRScanner() {
     if (qrScanner) return;
-
     const container = document.getElementById('qr-reader');
-    if (!container) {
-      updateScanStatus('Scanner nicht verfügbar', 'danger');
-      return;
-    }
-
-    if (!window.Html5Qrcode) {
-      updateScanStatus('Scanner lädt...', 'warning');
-      setTimeout(startScanner, 500);
-      return;
-    }
+    if (!container || !window.Html5Qrcode) return;
 
     qrScanner = new window.Html5Qrcode('qr-reader');
     const config = { fps: 10, qrbox: { width: 240, height: 240 } };
 
     window.Html5Qrcode.getCameras()
-      .then((cameras) => {
-        if (!cameras || cameras.length === 0) {
-          throw new Error('Keine Kamera gefunden');
-        }
-        const cameraId = cameras[0].id;
-        updateScanStatus('Bereit zum Scannen', 'success');
-        return qrScanner.start(cameraId, config, onScanSuccess, onScanFailure);
+      .then(cameras => {
+        if (!cameras || !cameras.length) throw new Error('Keine Kamera');
+        return qrScanner.start(cameras[0].id, config, onQRScan, onQRError);
       })
-      .catch((err) => {
-        console.error('Scanner Fehler:', err);
-        updateScanStatus('Kamera nicht verfügbar', 'danger');
-        qrScanner = null;
+      .catch(err => {
+        console.error('Scanner Error:', err);
+        updateScanStatus('Kamera nicht verfügbar');
       });
   }
 
-  function stopScanner() {
-    if (!qrScanner) return;
-    qrScanner.stop().then(() => {
-      qrScanner.clear();
-      qrScanner = null;
-    });
-  }
-
-  function onScanSuccess(decodedText) {
+  function onQRScan(decodedText) {
     try {
       const payload = JSON.parse(decodedText);
-      if (!payload?.peerId) throw new Error('Ungültiger QR‑Code');
+      if (!payload?.peerId) throw new Error('Invalid QR');
       lastPayload = payload;
-      console.log('QR gescannt:', payload);
-      updateScanStatus('QR gescannt – verbinde…', 'success');
+      updateScanStatus('QR gescannt');
       connectPeer(payload);
       setTimeout(() => {
-        if (conn && conn.open) {
-          updateScanStatus('Verbunden – Login auswählen', 'success');
-          setView('manager');
+        if (conn?.open) {
+          setMode('login-selection-mode');
+          renderAvailableLogins();
         }
-      }, 500);
+      }, 1000);
     } catch (err) {
-      console.error('QR Parse error:', err);
-      updateScanStatus('Ungültiger QR‑Code', 'warning');
+      updateScanStatus('Ungültiger QR-Code');
     }
   }
 
-  function onScanFailure() {
-    // Scan failure - continue scanning
+  function onQRError() {}
+
+  function updateScanStatus(text) {
+    const statusEl = document.getElementById('scan-status-text');
+    if (statusEl) statusEl.textContent = text;
   }
 
-  function updateScanStatus(text, type) {
-    if (!scanStatus) return;
-    scanStatus.textContent = text;
-    scanStatus.classList.remove('success', 'warning', 'danger');
-    if (type) scanStatus.classList.add(type);
-  }
-
-  function updateConnectionStatus(text, type) {
-    if (!connStatus) return;
-    connStatus.textContent = text;
-    connStatus.classList.remove('success', 'warning', 'danger');
-    if (type) connStatus.classList.add(type);
-  }
-
+  // ===== Peer Connection =====
   function connectPeer(payload) {
-    if (!window.Peer) {
-      updateConnectionStatus('PeerJS fehlt', 'danger');
-      return;
-    }
-
-    if (peer) {
-      peer.destroy();
-      peer = null;
-    }
+    if (!window.Peer) return;
+    if (peer) peer.destroy();
 
     peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
-    updateConnectionStatus('Verbinde…', 'warning');
-
     peer.on('open', () => {
       conn = peer.connect(payload.peerId, { reliable: true });
       conn.on('open', () => {
-        updateConnectionStatus('Verbunden', 'success');
-        connInstance.textContent = payload.host || 'Unbekannt';
         conn.send({ type: 'EasyLoginHello', client: 'PWA' });
       });
-
-      conn.on('close', () => updateConnectionStatus('Verbindung getrennt', 'warning'));
-      conn.on('error', () => updateConnectionStatus('Verbindungsfehler', 'danger'));
+      conn.on('close', () => {
+        updateScanStatus('Verbindung getrennt');
+        setMode('camera-mode');
+      });
     });
-
-    peer.on('error', () => updateConnectionStatus('PeerJS Fehler', 'danger'));
+    peer.on('error', () => updateScanStatus('PeerJS Fehler'));
   }
 
-  async function performLogin(username, password) {
-    if (!conn || !conn.open || !lastPayload?.host) {
-      updateConnectionStatus('Keine Verbindung', 'danger');
-      return;
-    }
-
-    updateConnectionStatus('Login wird gesendet…', 'warning');
-
-    const url = `https://${lastPayload.host}/api/logins`;
-    const body = {
-      login: {
-        username,
-        password
-      }
-    };
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      });
-
-      const data = await response.json().catch(() => null);
-      const payload = {
-        type: 'EasyLoginResponse',
-        success: response.ok,
-        status: response.status,
-        session: data,
-        host: lastPayload.host,
-        ref: lastPayload.ref || lastPayload.host
-      };
-
-      conn.send(payload);
-      updateConnectionStatus(response.ok ? 'Login erfolgreich' : 'Login fehlgeschlagen', response.ok ? 'success' : 'danger');
-    } catch (error) {
-      conn.send({
-        type: 'EasyLoginResponse',
-        success: false,
-        error: error?.message || 'Unbekannter Fehler',
-        host: lastPayload.host,
-        ref: lastPayload.ref || lastPayload.host
-      });
-      updateConnectionStatus('Login fehlgeschlagen', 'danger');
-    }
-  }
-
-  function renderLogins() {
-    if (!loginList) return;
-
-    if (!logins.length) {
-      loginList.innerHTML = '<p class="muted">Noch keine Logins gespeichert.</p>';
-      return;
-    }
-
-    loginList.innerHTML = '';
-    logins.forEach((item) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'login-item';
-
-      wrapper.innerHTML = `
-        <div class="row">
-          <strong>${escapeHtml(item.name)}</strong>
-          <span class="muted">${escapeHtml(item.username)}</span>
-        </div>
-        <div class="actions">
-          <button class="login-btn">Login</button>
-          <button class="edit-btn">Bearbeiten</button>
-          <button class="delete-btn">Löschen</button>
-        </div>
-      `;
-
-      wrapper.querySelector('.login-btn').addEventListener('click', () => {
-        performLogin(item.username, item.password);
-      });
-
-      wrapper.querySelector('.edit-btn').addEventListener('click', () => {
-        document.getElementById('login-id').value = item.id;
-        document.getElementById('login-name').value = item.name;
-        document.getElementById('login-username').value = item.username;
-        document.getElementById('login-password').value = item.password;
-      });
-
-      wrapper.querySelector('.delete-btn').addEventListener('click', () => {
-        logins = logins.filter((entry) => entry.id !== item.id);
-        saveLogins();
-        renderLogins();
-      });
-
-      loginList.appendChild(wrapper);
-    });
-  }
-
+  // ===== Login Management =====
   function loadLogins() {
     try {
-      const raw = localStorage.getItem('easylogins');
-      return raw ? JSON.parse(raw) : [];
+      logins = JSON.parse(localStorage.getItem(LOGINS_KEY) || '[]');
     } catch {
-      return [];
+      logins = [];
     }
   }
 
   function saveLogins() {
-    localStorage.setItem('easylogins', JSON.stringify(logins));
+    localStorage.setItem(LOGINS_KEY, JSON.stringify(logins));
   }
 
-  function escapeHtml(value) {
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
+  function renderLoginsList() {
+    const list = document.getElementById('logins-list');
+    if (!list) return;
 
-  function generateId() {
-    if (crypto?.randomUUID) {
-      return crypto.randomUUID();
+    if (!logins.length) {
+      list.innerHTML = '<p style="text-align: center; color: var(--muted);">Noch keine Logins</p>';
+      return;
     }
+
+    list.innerHTML = logins.map((login, idx) => `
+      <div class="login-item" data-login-idx="${idx}">
+        <div class="login-info">
+          <strong>${escapeHtml(login.name)}</strong>
+          <span>${escapeHtml(login.username)}</span>
+        </div>
+        <div class="login-actions">
+          <button class="edit-login-btn">Bearbeiten</button>
+        </div>
+      </div>
+    `).join('');
+
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('.edit-login-btn');
+      if (btn) {
+        const item = btn.closest('.login-item');
+        const idx = parseInt(item.dataset.loginIdx);
+        if (logins[idx]) editLogin(logins[idx].id);
+      }
+    });
+  }
+
+  function editLogin(id) {
+    currentLoginId = id;
+    const login = logins.find(l => l.id === id);
+    if (!login) return;
+
+    document.getElementById('form-title').textContent = 'Login bearbeiten';
+    document.getElementById('login-id').value = id;
+    document.getElementById('login-name').value = login.name;
+    document.getElementById('login-username').value = login.username;
+    document.getElementById('login-password').value = login.password;
+    document.getElementById('login-2fa').value = login.twofa || '';
+    document.getElementById('login-note').value = login.note || '';
+    document.getElementById('delete-login-btn').classList.remove('hidden');
+    document.getElementById('login-form-container').classList.remove('hidden');
+  }
+
+  function showAddLoginForm() {
+    currentLoginId = null;
+    document.getElementById('form-title').textContent = 'Login hinzufügen';
+    document.getElementById('login-form').reset();
+    document.getElementById('delete-login-btn').classList.add('hidden');
+    document.getElementById('login-form-container').classList.remove('hidden');
+  }
+
+  function handleLoginFormSubmit(e) {
+    e.preventDefault();
+    const id = document.getElementById('login-id').value || generateId();
+    const name = document.getElementById('login-name').value.trim();
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const twofa = document.getElementById('login-2fa').value.trim();
+    const note = document.getElementById('login-note').value.trim();
+
+    if (!name || !username || !password) return;
+
+    const idx = logins.findIndex(l => l.id === id);
+    const login = { id, name, username, password, twofa, note };
+
+    if (idx >= 0) {
+      logins[idx] = login;
+    } else {
+      logins.push(login);
+    }
+
+    saveLogins();
+    renderLoginsList();
+    document.getElementById('login-form-container').classList.add('hidden');
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.id === 'delete-login-btn') {
+      e.preventDefault();
+      const id = document.getElementById('login-id').value;
+      logins = logins.filter(l => l.id !== id);
+      saveLogins();
+      renderLoginsList();
+      document.getElementById('login-form-container').classList.add('hidden');
+    }
+  });
+
+  // ===== Available Logins After QR Scan =====
+  function renderAvailableLogins() {
+    const container = document.getElementById('available-logins');
+    if (!container) return;
+
+    if (!logins.length) {
+      container.innerHTML = '<p style="text-align: center; color: var(--muted);">Keine Logins vorhanden</p>';
+      return;
+    }
+
+    container.innerHTML = logins.map((login, idx) => `
+      <button class="available-login-btn" data-login-idx="${idx}">
+        <strong>${escapeHtml(login.name)}</strong><br>
+        <span style="font-size: 12px; color: var(--muted);">${escapeHtml(login.username)}</span>
+      </button>
+    `).join('');
+
+    container.addEventListener('click', (e) => {
+      const btn = e.target.closest('.available-login-btn');
+      if (btn) {
+        const idx = parseInt(btn.dataset.loginIdx);
+        if (logins[idx]) selectLoginForSending(logins[idx].id);
+      }
+    });
+  }
+
+  function selectLoginForSending(id) {
+    const login = logins.find(l => l.id === id);
+    if (!login) return;
+    sendLogin(login.username, login.password, login.twofa);
+  }
+
+  // ===== Manual Login =====
+  function handleManualLogin(e) {
+    e.preventDefault();
+    const username = document.getElementById('manual-username').value.trim();
+    const password = document.getElementById('manual-password').value;
+    const twofa = document.getElementById('manual-2fa').value.trim();
+    sendLogin(username, password, twofa);
+  }
+
+  // ===== Send Login to Desktop =====
+  async function sendLogin(username, password, twofa = '') {
+    if (!conn?.open || !lastPayload) return;
+
+    try {
+      const url = `https://${lastPayload.host}/api/logins`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login: { username, password } })
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (data?.missing2fa) {
+        if (twofa) {
+          await verify2FA(twofa, data);
+        } else {
+          show2FADialog(data);
+        }
+        return;
+      }
+
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: response.ok,
+        session: data,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
+
+      setMode('camera-mode');
+    } catch (error) {
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: false,
+        error: error?.message,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
+    }
+  }
+
+  // ===== 2FA Handling =====
+  function show2FADialog(loginData) {
+    const dialog = document.getElementById('twofa-dialog');
+    document.getElementById('twofa-input').value = '';
+    dialog.classList.remove('hidden');
+    window._current2FAData = loginData;
+  }
+
+  async function verify2FA(code, loginData) {
+    if (!conn?.open || !lastPayload) return;
+
+    try {
+      const url = `https://${lastPayload.host}/api/session/verify2fa/all/${code}`;
+      const response = await fetch(url, {
+        headers: {
+          'x-session-token': loginData.sessionToken || loginData.sessionId || ''
+        }
+      });
+
+      const verifyData = await response.json().catch(() => null);
+
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: response.ok,
+        session: verifyData || loginData,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
+
+      setMode('camera-mode');
+    } catch (error) {
+      conn.send({
+        type: 'EasyLoginResponse',
+        success: false,
+        error: error?.message,
+        host: lastPayload.host,
+        ref: lastPayload.ref
+      });
+    }
+  }
+
+  function handle2FASubmit() {
+    const code = document.getElementById('twofa-input').value;
+    if (code && window._current2FAData) {
+      verify2FA(code, window._current2FAData);
+      document.getElementById('twofa-dialog').classList.add('hidden');
+    }
+  }
+
+  // ===== Export/Import =====
+  function exportLogins() {
+    const data = JSON.stringify(logins, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `easylogin-backup-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importLogins() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const imported = JSON.parse(event.target?.result || '[]');
+          if (Array.isArray(imported)) {
+            logins = imported;
+            saveLogins();
+            completeSetup();
+          }
+        } catch (err) {
+          alert('Import fehlgeschlagen');
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  // ===== Utilities =====
+  function generateId() {
     return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
+      navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   }
 })();

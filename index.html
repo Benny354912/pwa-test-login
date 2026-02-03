@@ -10,108 +10,213 @@
 </head>
 <body>
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-icon">⚡</div>
-        <div>
-          <h1>Easy Login</h1>
-          <p>Smartphone → Desktop‑Login</p>
+    <!-- Setup-Bildschirm (Nur beim ersten Mal) -->
+    <div id="setup-screen" class="screen hidden">
+      <div class="setup-container">
+        <div class="setup-header">
+          <h1>🔐 Easy Login Setup</h1>
+          <p>Schütze deine Logins mit einer Sicherheitsmethode</p>
+        </div>
+
+        <div class="setup-options">
+          <button class="setup-option" data-protection="none">
+            <div class="setup-icon">✓</div>
+            <h3>Kein Schutz</h3>
+            <p>Schnelle Nutzung, keine Sicherheit</p>
+          </button>
+          <button class="setup-option" data-protection="pattern">
+            <div class="setup-icon">⊙</div>
+            <h3>Muster</h3>
+            <p>Schnell & sicher</p>
+          </button>
+          <button class="setup-option" data-protection="pin">
+            <div class="setup-icon">📌</div>
+            <h3>PIN</h3>
+            <p>4-8 Ziffern</p>
+          </button>
+          <button class="setup-option" data-protection="password">
+            <div class="setup-icon">🔒</div>
+            <h3>Passwort</h3>
+            <p>Maximale Sicherheit</p>
+          </button>
+        </div>
+
+        <div class="setup-footer">
+          <button id="setup-import-btn" class="secondary-btn">Oder Logins importieren</button>
         </div>
       </div>
-      <button id="toggle-view" class="ghost-btn">Passwort‑Manager</button>
-    </header>
 
-    <main class="content">
-      <section id="scan-view" class="view active">
-        <div class="camera-card" id="scan-tap-area">
-          <div class="camera-header">
-            <h2>QR‑Code scannen</h2>
-            <span id="scan-status" class="status-pill">Kamera wird gestartet…</span>
-          </div>
-          <div id="qr-reader" class="qr-reader"></div>
-          <div class="scan-overlay">
-            <div class="scan-info">
-              <p>Tippe auf den Bildschirm, um den Passwort‑Manager zu öffnen.</p>
-              <p>Nach dem Scan wird automatisch verbunden.</p>
+      <!-- Pattern Setup -->
+      <div id="pattern-setup" class="protection-setup hidden">
+        <div class="protection-header">
+          <button class="back-btn">←</button>
+          <h2>Muster definieren</h2>
+        </div>
+        <div id="pattern-canvas" class="pattern-canvas"></div>
+        <p id="pattern-status" class="status-text">Tippe auf die Punkte um ein Muster zu zeichnen</p>
+        <button id="pattern-next-btn" class="primary-btn hidden">Nächste Schritte →</button>
+      </div>
+
+      <!-- PIN Setup -->
+      <div id="pin-setup" class="protection-setup hidden">
+        <div class="protection-header">
+          <button class="back-btn">←</button>
+          <h2>PIN definieren</h2>
+        </div>
+        <div class="pin-input-group">
+          <input type="number" id="pin-input" placeholder="4-8 Ziffern" min="4" max="99999999" />
+          <p id="pin-error" class="error-text hidden"></p>
+        </div>
+        <button id="pin-next-btn" class="primary-btn">Nächste Schritte →</button>
+      </div>
+
+      <!-- Password Setup -->
+      <div id="password-setup" class="protection-setup hidden">
+        <div class="protection-header">
+          <button class="back-btn">←</button>
+          <h2>Passwort definieren</h2>
+        </div>
+        <div class="password-input-group">
+          <input type="password" id="password-input" placeholder="Passwort" />
+          <input type="password" id="password-confirm" placeholder="Bestätigen" />
+          <p id="password-error" class="error-text hidden"></p>
+        </div>
+        <button id="password-next-btn" class="primary-btn">Nächste Schritte →</button>
+      </div>
+    </div>
+
+    <!-- Lock Screen (Bei jedem App-Start) -->
+    <div id="lock-screen" class="screen hidden">
+      <div class="lock-container">
+        <h1>🔐 Easy Login</h1>
+        
+        <!-- PIN Lock -->
+        <div id="pin-lock" class="lock-method hidden">
+          <input type="password" id="pin-unlock" placeholder="PIN eingeben" />
+          <p id="pin-lock-error" class="error-text hidden"></p>
+        </div>
+
+        <!-- Pattern Lock -->
+        <div id="pattern-lock" class="lock-method hidden">
+          <div id="pattern-unlock-canvas" class="pattern-canvas"></div>
+          <p id="pattern-lock-error" class="error-text hidden"></p>
+        </div>
+
+        <!-- Password Lock -->
+        <div id="password-lock" class="lock-method hidden">
+          <input type="password" id="password-unlock" placeholder="Passwort eingeben" />
+          <p id="password-lock-error" class="error-text hidden"></p>
+        </div>
+
+        <button id="unlock-btn" class="primary-btn">Entsperren</button>
+      </div>
+    </div>
+
+    <!-- Hauptbildschirm -->
+    <div id="main-screen" class="screen">
+      <!-- Kamera-Modus (Fullscreen) -->
+      <div id="camera-mode" class="mode active">
+        <div id="qr-reader" class="qr-reader-fullscreen"></div>
+        <div class="camera-overlay">
+          <div class="scan-frame"></div>
+          <p id="scan-status-text" class="scan-status">Kamera wird gestartet…</p>
+        </div>
+
+        <!-- Edit-Button (Unten Rechts) -->
+        <button id="edit-logins-btn" class="edit-fab" title="Logins bearbeiten">✎</button>
+      </div>
+
+      <!-- Login-Editor-Modus -->
+      <div id="editor-mode" class="mode">
+        <div class="editor-header">
+          <button id="back-to-camera-btn" class="back-btn">←</button>
+          <h1>Logins verwalten</h1>
+          <button id="add-login-btn" class="action-btn">+ Hinzufügen</button>
+        </div>
+
+        <div class="editor-content">
+          <!-- Login Liste -->
+          <div id="logins-list" class="logins-list"></div>
+
+          <!-- Add/Edit Form -->
+          <div id="login-form-container" class="login-form-container hidden">
+            <div class="form-header">
+              <button id="cancel-form-btn" class="back-btn">←</button>
+              <h2 id="form-title">Login hinzufügen</h2>
             </div>
+            <form id="login-form" class="login-form">
+              <input type="hidden" id="login-id" />
+              <label>
+                Name
+                <input type="text" id="login-name" placeholder="z.B. AdminPlus" required />
+              </label>
+              <label>
+                Username
+                <input type="text" id="login-username" required />
+              </label>
+              <label>
+                Passwort
+                <input type="password" id="login-password" required />
+              </label>
+              <label>
+                2FA Schlüssel (Optional)
+                <input type="text" id="login-2fa" placeholder="Authenticator-Schlüssel" />
+              </label>
+              <label>
+                Notiz (Optional)
+                <textarea id="login-note" placeholder="Weitere Informationen…" rows="3"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="primary-btn">Speichern</button>
+                <button type="button" id="delete-login-btn" class="danger-btn hidden">Löschen</button>
+              </div>
+            </form>
           </div>
         </div>
-      </section>
 
-      <section id="manager-view" class="view">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Passwort‑Manager</h2>
-              <p class="muted">Gespeicherte Logins und manuelle Eingabe</p>
-            </div>
-            <button id="back-to-scan" class="ghost-btn">Zur Kamera</button>
-          </div>
+        <div class="editor-footer">
+          <button id="export-logins-btn" class="secondary-btn">📥 Exportieren</button>
+          <button id="settings-btn" class="secondary-btn">⚙️ Einstellungen</button>
+        </div>
+      </div>
 
-          <div class="connection-status">
-            <div>
-              <span class="label">Verbindung</span>
-              <span id="conn-status" class="status-pill warning">Nicht verbunden</span>
-            </div>
-            <div>
-              <span class="label">Instanz</span>
-              <span id="conn-instance" class="value">---</span>
-            </div>
-          </div>
+      <!-- Nach QR-Scan: Login-Auswahl oder Manuelle Eingabe -->
+      <div id="login-selection-mode" class="mode">
+        <div class="selection-header">
+          <button id="cancel-selection-btn" class="back-btn">← Zurück</button>
+          <h2>Login auswählen</h2>
+        </div>
+        <div class="selection-content">
+          <div id="available-logins" class="available-logins"></div>
+          <div class="divider">oder</div>
+          <form id="manual-login-form" class="manual-login-form">
+            <input type="text" id="manual-username" placeholder="Username" required />
+            <input type="password" id="manual-password" placeholder="Passwort" required />
+            <input type="text" id="manual-2fa" placeholder="2FA Code (optional)" />
+            <button type="submit" class="primary-btn">Login senden</button>
+          </form>
+        </div>
+      </div>
 
-          <div class="grid">
-            <div class="card">
-              <h3>Gespeicherte Logins</h3>
-              <div id="login-list" class="login-list"></div>
-            </div>
-
-            <div class="card">
-              <h3>Neuen Login speichern</h3>
-              <form id="login-form" class="form">
-                <input type="hidden" id="login-id" />
-                <label>
-                  Name
-                  <input type="text" id="login-name" placeholder="z.B. AdminPlus" required />
-                </label>
-                <label>
-                  Username
-                  <input type="text" id="login-username" required />
-                </label>
-                <label>
-                  Passwort
-                  <input type="password" id="login-password" required />
-                </label>
-                <div class="form-actions">
-                  <button type="submit" class="primary-btn">Speichern</button>
-                  <button type="button" id="reset-form" class="ghost-btn">Zurücksetzen</button>
-                </div>
-              </form>
-            </div>
-
-            <div class="card">
-              <h3>Manuell einloggen</h3>
-              <form id="manual-form" class="form">
-                <label>
-                  Username
-                  <input type="text" id="manual-username" required />
-                </label>
-                <label>
-                  Passwort
-                  <input type="password" id="manual-password" required />
-                </label>
-                <button type="submit" class="primary-btn">Login senden</button>
-              </form>
-              <p class="muted">Sendet die Zugangsdaten an die Desktop‑Erweiterung.</p>
-            </div>
+      <!-- 2FA-Dialog -->
+      <div id="twofa-dialog" class="dialog hidden">
+        <div class="dialog-content">
+          <h2>2FA Code erforderlich</h2>
+          <p id="twofa-message">Geben Sie den 2FA Code ein:</p>
+          <input type="text" id="twofa-input" placeholder="6-stelliger Code" maxlength="6" />
+          <div class="dialog-actions">
+            <button id="twofa-cancel-btn" class="secondary-btn">Abbrechen</button>
+            <button id="twofa-submit-btn" class="primary-btn">Bestätigen</button>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
 
   <script src="vendor/peerjs.min.js"></script>
   <script src="vendor/jsqr.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
+  <script src="crypto-utils.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
