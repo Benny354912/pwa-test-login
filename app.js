@@ -586,8 +586,7 @@
         headers: {
           'Content-Type': 'application/json',
           'x-session-token': sessionToken
-        },
-        body: JSON.stringify({ token: sessionToken })
+        }
       });
 
       log('2FA Response Status:', response.status);
