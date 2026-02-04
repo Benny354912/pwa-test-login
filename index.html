@@ -164,6 +164,18 @@
         </div>
 
         <div class="editor-content">
+          <!-- Suche & Filter -->
+          <div class="login-controls">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="login-search" placeholder="Logins durchsuchen..." />
+            </div>
+            <select id="login-sort" class="sort-select">
+              <option value="name">A-Z</option>
+              <option value="recent">Zuletzt verwendet</option>
+            </select>
+          </div>
+          
           <!-- Login Liste -->
           <div id="logins-list" class="logins-list"></div>
 
@@ -188,8 +200,14 @@
                 <input type="password" id="login-password" required />
               </label>
               <label>
-                2FA Schlüssel (Optional)
-                <input type="text" id="login-2fa" placeholder="Authenticator-Schlüssel" />
+                2FA Secret (Optional)
+                <input type="text" id="login-2fa" placeholder="z.B. JBSWY3DPEHPK3PXP" />
+                <small style="color: var(--muted); font-size: 11px; margin-top: 4px; display: block;">
+                  Der Secret-Schlüssel aus deiner Authenticator-App (wird automatisch in einen Code umgewandelt)
+                </small>
+                <div id="totp-preview" style="display: none; margin-top: 8px; padding: 8px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; font-size: 12px; color: #0369a1;">
+                  <strong>Aktueller Code:</strong> <span id="totp-code" style="font-family: monospace; font-size: 18px; font-weight: bold;"></span>
+                </div>
               </label>
               <label>
                 Notiz (Optional)
@@ -216,6 +234,12 @@
           <h2>Login auswählen</h2>
         </div>
         <div class="selection-content">
+          <!-- Suche für Auswahl -->
+          <div class="search-box selection-search">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="selection-search" placeholder="Login suchen..." />
+          </div>
+          
           <div id="available-logins" class="available-logins"></div>
           <div class="divider">oder</div>
           <form id="manual-login-form" class="manual-login-form">
@@ -246,6 +270,7 @@
   <script src="vendor/jsqr.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
   <script src="crypto-utils.js"></script>
+  <script src="totp-utils.js"></script>
   <script src="app.js"></script>
   <!--<script src="dev_console.js"></script>-->
 </body>

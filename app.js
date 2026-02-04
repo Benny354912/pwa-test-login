@@ -350,6 +350,55 @@
     document.getElementById('settings-btn')?.addEventListener('click', () => {
       alert('Einstellungen in Bearbeitung');
     });
+    
+    // Suche & Sort Event-Listener
+    document.getElementById('login-search')?.addEventListener('input', (e) => {
+      renderLoginsList(e.target.value);
+    });
+    document.getElementById('login-sort')?.addEventListener('change', () => {
+      const searchValue = document.getElementById('login-search')?.value || '';
+      renderLoginsList(searchValue);
+    });
+    
+    // TOTP Preview Event-Listener
+    const login2faInput = document.getElementById('login-2fa');
+    if (login2faInput) {
+      let totpInterval = null;
+      
+      const updateTOTPPreview = () => {
+        const secret = login2faInput.value.trim();
+        const previewDiv = document.getElementById('totp-preview');
+        const codeSpan = document.getElementById('totp-code');
+        
+        if (secret && window.TOTPUtils) {
+          const code = window.TOTPUtils.generateTOTP(secret);
+          if (code) {
+            codeSpan.textContent = code;
+            previewDiv.style.display = 'block';
+          } else {
+            previewDiv.style.display = 'none';
+          }
+        } else {
+          previewDiv.style.display = 'none';
+        }
+      };
+      
+      login2faInput.addEventListener('input', () => {
+        updateTOTPPreview();
+        // Update alle 30 Sekunden wenn Secret eingegeben
+        if (totpInterval) clearInterval(totpInterval);
+        if (login2faInput.value.trim()) {
+          totpInterval = setInterval(updateTOTPPreview, 30000);
+        }
+      });
+      
+      login2faInput.addEventListener('blur', () => {
+        if (totpInterval) {
+          clearInterval(totpInterval);
+          totpInterval = null;
+        }
+      });
+    }
   }
 
   // ===== QR Scanner =====
@@ -386,6 +435,15 @@
           log('Verbindung offen, zeige Login-Auswahl');
           setMode('login-selection-mode');
           renderAvailableLogins();
+          
+          // Suche Event-Listener für Login-Auswahl
+          const selectionSearch = document.getElementById('selection-search');
+          if (selectionSearch) {
+            selectionSearch.value = '';
+            selectionSearch.addEventListener('input', (e) => {
+              renderAvailableLogins(e.target.value);
+            });
+          }
         } else {
           log('Verbindung NICHT offen nach 1s');
         }
@@ -482,26 +540,60 @@
     }
   }
 
-  function renderLoginsList() {
+  function renderLoginsList(filter = '') {
     const list = document.getElementById('logins-list');
     if (!list) return;
 
     if (!logins.length) {
-      list.innerHTML = '<p style="text-align: center; color: var(--muted);">Noch keine Logins</p>';
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">🔐</div><p>Noch keine Logins</p><small>Füge deinen ersten Login hinzu</small></div>';
       return;
     }
 
-    list.innerHTML = logins.map((login, idx) => `
-      <div class="login-item" data-login-idx="${idx}">
-        <div class="login-info">
-          <strong>${escapeHtml(login.name)}</strong>
-          <span>${escapeHtml(login.username)}</span>
+    // Filter und Sort
+    let displayLogins = logins.map((login, idx) => ({ ...login, originalIdx: idx }));
+    
+    if (filter) {
+      const lowerFilter = filter.toLowerCase();
+      displayLogins = displayLogins.filter(login => 
+        login.name.toLowerCase().includes(lowerFilter) ||
+        login.username.toLowerCase().includes(lowerFilter)
+      );
+    }
+
+    const sortBy = document.getElementById('login-sort')?.value || 'name';
+    if (sortBy === 'name') {
+      displayLogins.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === 'recent') {
+      displayLogins.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+    }
+
+    if (!displayLogins.length) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>Keine Logins gefunden</p><small>Versuche einen anderen Suchbegriff</small></div>';
+      return;
+    }
+
+    list.innerHTML = displayLogins.map(login => {
+      const has2FA = login.twofa && login.twofa.trim();
+      const hasNote = login.note && login.note.trim();
+      return `
+        <div class="login-item" data-login-idx="${login.originalIdx}">
+          <div class="login-icon">
+            ${has2FA ? '🔐' : '🔑'}
+          </div>
+          <div class="login-info">
+            <div class="login-name">${escapeHtml(login.name)}</div>
+            <div class="login-username">${escapeHtml(login.username)}</div>
+            ${hasNote ? `<div class="login-note-preview">📝 ${escapeHtml(login.note.substring(0, 40))}${login.note.length > 40 ? '...' : ''}</div>` : ''}
+          </div>
+          <div class="login-badges">
+            ${has2FA ? '<span class="badge badge-2fa">2FA</span>' : ''}
+          </div>
+          <div class="login-actions">
+            <button class="edit-login-btn" title="Bearbeiten">✎</button>
+          </div>
         </div>
-        <div class="login-actions">
-          <button class="edit-login-btn">Bearbeiten</button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     list.addEventListener('click', (e) => {
       const btn = e.target.closest('.edit-login-btn');
@@ -574,21 +666,47 @@
   });
 
   // ===== Available Logins After QR Scan =====
-  function renderAvailableLogins() {
+  function renderAvailableLogins(filter = '') {
     const container = document.getElementById('available-logins');
     if (!container) return;
 
     if (!logins.length) {
-      container.innerHTML = '<p style="text-align: center; color: var(--muted);">Keine Logins vorhanden</p>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔐</div><p>Keine Logins vorhanden</p><small>Füge zuerst einen Login hinzu</small></div>';
       return;
     }
 
-    container.innerHTML = logins.map((login, idx) => `
-      <button class="available-login-btn" data-login-idx="${idx}">
-        <strong>${escapeHtml(login.name)}</strong><br>
-        <span style="font-size: 12px; color: var(--muted);">${escapeHtml(login.username)}</span>
-      </button>
-    `).join('');
+    // Filter
+    let displayLogins = logins.map((login, idx) => ({ ...login, originalIdx: idx }));
+    
+    if (filter) {
+      const lowerFilter = filter.toLowerCase();
+      displayLogins = displayLogins.filter(login => 
+        login.name.toLowerCase().includes(lowerFilter) ||
+        login.username.toLowerCase().includes(lowerFilter)
+      );
+    }
+
+    // Sort alphabetically
+    displayLogins.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!displayLogins.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>Keine Logins gefunden</p><small>Versuche einen anderen Suchbegriff</small></div>';
+      return;
+    }
+
+    container.innerHTML = displayLogins.map(login => {
+      const has2FA = login.twofa && login.twofa.trim();
+      return `
+        <button class="available-login-btn" data-login-idx="${login.originalIdx}">
+          <div class="login-select-icon">${has2FA ? '🔐' : '🔑'}</div>
+          <div class="login-select-info">
+            <div class="login-select-name">${escapeHtml(login.name)}</div>
+            <div class="login-select-username">${escapeHtml(login.username)}</div>
+          </div>
+          ${has2FA ? '<span class="badge badge-2fa-mini">2FA</span>' : ''}
+        </button>
+      `;
+    }).join('');
 
     container.addEventListener('click', (e) => {
       const btn = e.target.closest('.available-login-btn');
@@ -606,8 +724,33 @@
       log('Fehler: Login nicht gefunden');
       return;
     }
+    
+    // Update lastUsed timestamp
+    login.lastUsed = Date.now();
+    saveLogins();
+    
     log('Sende Login:', { name: login.name, username: login.username });
-    sendLogin(login.username, login.password, login.twofa);
+    
+    // Generiere TOTP-Code aus Secret falls vorhanden
+    let twofaCode = '';
+    if (login.twofa && login.twofa.trim()) {
+      if (window.TOTPUtils) {
+        twofaCode = window.TOTPUtils.generateTOTP(login.twofa);
+        if (twofaCode) {
+          log('✓ 2FA Code generiert:', twofaCode);
+        } else {
+          log('✗ Fehler beim Generieren des 2FA Codes');
+          updateScanStatus('Fehler: 2FA Secret ungültig');
+          return;
+        }
+      } else {
+        log('✗ TOTP Utils nicht verfügbar');
+        updateScanStatus('Fehler: TOTP-Modul fehlt');
+        return;
+      }
+    }
+    
+    sendLogin(login.username, login.password, twofaCode);
   }
 
   // ===== Manual Login =====
@@ -626,7 +769,7 @@
       return;
     }
 
-    log('Sende Login:', { username, hasPassword: !!password, host: lastPayload.host });
+    log('Sende Login:', { username, hasPassword: !!password, has2FA: !!twofa, host: lastPayload.host });
 
     try {
       const url = `https://${lastPayload.host}/api/logins`;
