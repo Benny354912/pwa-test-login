@@ -329,6 +329,9 @@
     setMode('camera-mode');
     startQRScanner();
     renderLoginsList();
+    
+    // Cleanup alte Sessions beim Start
+    cleanupAllOldSessions();
 
     document.getElementById('edit-logins-btn')?.addEventListener('click', () => setMode('editor-mode'));
     document.getElementById('back-to-camera-btn')?.addEventListener('click', () => {
@@ -345,6 +348,9 @@
     document.getElementById('twofa-submit-btn')?.addEventListener('click', handle2FASubmit);
     document.getElementById('twofa-cancel-btn')?.addEventListener('click', () => {
       document.getElementById('twofa-dialog').classList.add('hidden');
+    });
+    document.getElementById('close-history-btn')?.addEventListener('click', () => {
+      document.getElementById('login-history-dialog').classList.add('hidden');
     });
     document.getElementById('export-logins-btn')?.addEventListener('click', exportLogins);
     document.getElementById('settings-btn')?.addEventListener('click', () => {
@@ -540,6 +546,173 @@
     }
   }
 
+  // ===== Login History Tracking =====
+  function recordLoginSession(loginId, sessionData) {
+    const login = logins.find(l => l.id === loginId);
+    if (!login) return;
+    
+    // Initialisiere history wenn nicht vorhanden
+    if (!login.history) login.history = [];
+    
+    // Versuche sessionid aus verschiedenen Stellen zu finden
+    let sessionId = sessionData?.sessionid || 
+                    sessionData?.sessionId || 
+                    sessionData?.session?.sessionid ||
+                    sessionData?.session?.sessionId ||
+                    sessionData?.id || 
+                    sessionData?.session?.id ||
+                    '';
+    
+    if (!sessionId) {
+      log('Warnung: Keine sessionid für Login-History', sessionData);
+      return;
+    }
+    
+    // Prüfe ob diese Session bereits existiert (Duplikat-Vermeidung)
+    const existingSession = login.history.find(entry => entry.sessionId === sessionId);
+    if (existingSession) {
+      log('Session bereits vorhanden, überspringe:', { sessionId: sessionId.substring(0, 16) });
+      return;
+    }
+    
+    const historyEntry = {
+      timestamp: Date.now(),
+      sessionId: sessionId,
+      host: lastPayload?.host || 'unknown'
+    };
+    
+    login.history.push(historyEntry);
+    log('Login-Session aufgezeichnet:', { loginName: login.name, sessionId: sessionId.substring(0, 16) });
+    
+    // Cleanup alte Einträge (älter als 24h)
+    cleanupOldSessions(loginId);
+    
+    saveLogins();
+  }
+  
+  function cleanupOldSessions(loginId) {
+    const login = logins.find(l => l.id === loginId);
+    if (!login || !login.history) return;
+    
+    const now = Date.now();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+    const beforeCleanup = login.history.length;
+    
+    login.history = login.history.filter(entry => {
+      return (now - entry.timestamp) < twentyFourHours;
+    });
+    
+    const removed = beforeCleanup - login.history.length;
+    if (removed > 0) {
+      log(`Cleanup: ${removed} alte Session(s) gelöscht von ${login.name}`);
+    }
+  }
+  
+  function cleanupAllOldSessions() {
+    logins.forEach(login => cleanupOldSessions(login.id));
+    saveLogins();
+  }
+  
+  async function logoutSession(loginId, sessionId, host) {
+    try {
+      const url = `https://${host}/api/logouts`;
+      log('Logout Request zu:', url);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ session: { sessionid: sessionId } })
+      });
+      
+      log('Logout Response Status:', response.status);
+      
+      if (response.ok) {
+        // Entferne aus History
+        const login = logins.find(l => l.id === loginId);
+        if (login && login.history) {
+          login.history = login.history.filter(entry => entry.sessionId !== sessionId);
+          saveLogins();
+          log('Session aus History entfernt');
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      log('Logout Fehler:', err);
+      return false;
+    }
+  }
+  
+  function showLoginHistory(loginId) {
+    const login = logins.find(l => l.id === loginId);
+    if (!login) return;
+    
+    const dialog = document.getElementById('login-history-dialog');
+    const historyContainer = document.getElementById('login-history-list');
+    const noHistoryMsg = document.getElementById('login-history-empty');
+    
+    // Cleanup alte Sessions
+    cleanupOldSessions(loginId);
+    
+    if (!login.history || login.history.length === 0) {
+      historyContainer.style.display = 'none';
+      noHistoryMsg.style.display = 'block';
+    } else {
+      noHistoryMsg.style.display = 'none';
+      historyContainer.style.display = 'block';
+      
+      historyContainer.innerHTML = login.history.map((entry, idx) => {
+        const date = new Date(entry.timestamp);
+        const dateStr = date.toLocaleString('de-DE', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        
+        return `
+          <div class="history-entry">
+            <div class="history-info">
+              <div class="history-date">${dateStr}</div>
+              <div class="history-host">${escapeHtml(entry.host || 'unknown')}</div>
+              <div class="history-session-id">ID: ${escapeHtml(entry.sessionId.substring(0, 16))}...</div>
+            </div>
+            <button class="history-logout-btn" data-login-id="${loginId}" data-session-id="${entry.sessionId}" data-host="${entry.host}">
+              Logout
+            </button>
+          </div>
+        `;
+      }).join('');
+      
+      // Add logout button event listeners
+      historyContainer.querySelectorAll('.history-logout-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const loginIdVal = btn.dataset.loginId;
+          const sessionId = btn.dataset.sessionId;
+          const host = btn.dataset.host;
+          
+          if (confirm('Bist du sicher, dass du diesen Login beenden möchtest?')) {
+            const success = await logoutSession(loginIdVal, sessionId, host);
+            if (success) {
+              showLoginHistory(loginIdVal); // Refresh
+            } else {
+              alert('Logout fehlgeschlagen. Versuche es später nochmal.');
+            }
+          }
+        });
+      });
+    }
+    
+    // Set title
+    document.getElementById('login-history-title').textContent = `Login-Verlauf: ${escapeHtml(login.name)}`;
+    dialog.classList.remove('hidden');
+  }
+
   function renderLoginsList(filter = '') {
     const list = document.getElementById('logins-list');
     if (!list) return;
@@ -597,10 +770,16 @@
 
     list.addEventListener('click', (e) => {
       const btn = e.target.closest('.edit-login-btn');
+      const item = e.target.closest('.login-item');
+      
       if (btn) {
-        const item = btn.closest('.login-item');
+        // Edit Button geklickt
         const idx = parseInt(item.dataset.loginIdx);
         if (logins[idx]) editLogin(logins[idx].id);
+      } else if (item) {
+        // Login-Item selbst geklickt - zeige History
+        const idx = parseInt(item.dataset.loginIdx);
+        if (logins[idx]) showLoginHistory(logins[idx].id);
       }
     });
   }
@@ -731,6 +910,9 @@
     
     log('Sende Login:', { name: login.name, username: login.username });
     
+    // Speichere LoginId global für 2FA-Tracking
+    window._currentSendingLoginId = id;
+    
     // Generiere TOTP-Code aus Secret falls vorhanden
     let twofaCode = '';
     if (login.twofa && login.twofa.trim()) {
@@ -797,6 +979,20 @@
       });
 
       log('Login Response Data:', data);
+      
+      // Speichere Session SOFORT wenn sessionid vorhanden ist (auch bei missing2fa)
+      if (data && window._currentSendingLoginId) {
+        const sessionId = data?.sessionid || 
+                          data?.sessionId || 
+                          data?.session?.sessionid ||
+                          data?.session?.sessionId ||
+                          data?.id || 
+                          data?.session?.id;
+        
+        if (sessionId) {
+          recordLoginSession(window._currentSendingLoginId, data);
+        }
+      }
 
       if (data?.missing2fa) {
         log('2FA erforderlich');
@@ -811,7 +1007,7 @@
         if (twofa) {
           await verify2FA(twofa, data);
         } else {
-          show2FADialog(data);
+          show2FADialog(data, window._currentSendingLoginId);
         }
         return;
       }
@@ -839,11 +1035,12 @@
   }
 
   // ===== 2FA Handling =====
-  function show2FADialog(loginData) {
+  function show2FADialog(loginData, loginId = null) {
     const dialog = document.getElementById('twofa-dialog');
     document.getElementById('twofa-input').value = '';
     dialog.classList.remove('hidden');
     window._current2FAData = loginData;
+    window._current2FALoginId = loginId; // Speichere LoginId für späteren Zugriff
   }
 
   async function verify2FA(code, loginData) {
@@ -895,6 +1092,10 @@
       log('2FA Verify Data:', verifyData);
 
       if (response.ok) {
+        // Speichere erfolgreiche 2FA Session
+        if (window._current2FALoginId) {
+          recordLoginSession(window._current2FALoginId, verifyData || loginData);
+        }
         conn.send({
           type: 'EasyLoginResponse',
           success: true,

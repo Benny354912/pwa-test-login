@@ -176,7 +176,7 @@
             </select>
           </div>
           
-          <!-- Login Liste -->
+          <div class="login-list-hint">💡 Klick auf einen Login für Verlauf &amp; Logout</div>
           <div id="logins-list" class="logins-list"></div>
 
           <!-- Add/Edit Form -->
@@ -261,6 +261,23 @@
             <button id="twofa-cancel-btn" class="secondary-btn">Abbrechen</button>
             <button id="twofa-submit-btn" class="primary-btn">Bestätigen</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Login History Dialog -->
+      <div id="login-history-dialog" class="dialog hidden">
+        <div class="dialog-content login-history-content">
+          <div class="dialog-header">
+            <h2 id="login-history-title">Login-Verlauf</h2>
+            <button id="close-history-btn" class="close-btn">✕</button>
+          </div>
+          
+          <div id="login-history-empty" class="history-empty">
+            <div class="empty-icon">📋</div>
+            <p>Keine erfolgreichen Logins in den letzten 24 Stunden</p>
+          </div>
+          
+          <div id="login-history-list" class="login-history-list"></div>
         </div>
       </div>
     </div>
