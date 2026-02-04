@@ -596,7 +596,7 @@ body {
 .editor-footer {
   display: flex;
   gap: 10px;
-  padding: 12px 16px max(12px, env(safe-area-inset-bottom)) 16px;
+  padding: 12px 16px max(20px, env(safe-area-inset-bottom)) 16px;
   border-top: 1px solid #e2e8f0;
   background: var(--surface);
   flex-shrink: 0;
